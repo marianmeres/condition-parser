@@ -5,24 +5,6 @@ import type {
 	ConditionJoinOperator,
 } from "@marianmeres/condition-builder";
 
-// export interface Expression {
-// 	key: string;
-// 	operator: string;
-// 	value: string;
-// }
-
-// export type ConditionJoinOperator = "and" | "or";
-
-/**
- * Internal representation type taken from @marianmeres/condition-builder - this is
- * out parse target format, so we play nicely with the builder
- */
-// export type ConditionDump = {
-// 	operator: ConditionJoinOperator;
-// 	condition?: ConditionDump;
-// 	expression?: ExpressionContext;
-// }[];
-
 /**
  * Human friendly conditions notation parser. See README.md for examples.
  *
@@ -45,7 +27,7 @@ export class ConditionParser {
 	private constructor(
 		input: string,
 		defaultOperator = ConditionParser.DEFAULT_OPERATOR,
-		debug?: boolean,
+		debug?: boolean
 	) {
 		input = `${input}`.trim();
 		if (!input) throw new TypeError(`Expecting non empty input`);
@@ -175,7 +157,7 @@ export class ConditionParser {
 	/** Will parse the key:operato:value segment */
 	#parseBasicExpression(
 		out: ConditionDump,
-		currentOperator: ConditionJoinOperator,
+		currentOperator: ConditionJoinOperator
 	) {
 		this.#debug("parseBasicExpression:start", currentOperator);
 
@@ -236,17 +218,13 @@ export class ConditionParser {
 		};
 		this.#debug("parseBasicExpression:result", result);
 
-		// if (out.length > 1) {
-		// 	out.at(-1)!.operator = currentOperator;
-		// }
-
 		out.push(result);
 	}
 
 	/** Will recursively parse (...) */
 	#parseParenthesizedExpression(
 		out: ConditionDump,
-		currentOperator: ConditionJoinOperator,
+		currentOperator: ConditionJoinOperator
 	) {
 		this.#debug("parseParenthesizedExpression:start", currentOperator);
 
@@ -294,7 +272,7 @@ export class ConditionParser {
 	/** Parses sequences of terms connected by logical operators (and/or) */
 	#parseCondition(
 		out: ConditionDump,
-		conditionOperator: ConditionJoinOperator,
+		conditionOperator: ConditionJoinOperator
 	): ConditionDump {
 		this.#depth++;
 		this.#debug("parseCondition:start", conditionOperator);
@@ -345,7 +323,7 @@ export class ConditionParser {
 	static parse(
 		input: string,
 		defaultOperator?: string,
-		debug?: boolean,
+		debug?: boolean
 	): { parsed: ConditionDump; unparsed: string } {
 		const parser = new ConditionParser(input, defaultOperator, debug);
 

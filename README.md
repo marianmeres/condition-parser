@@ -2,7 +2,7 @@
 
 Human friendly conditions notation parser. Similar to Gmail's "Search email" input.
 
-The parsed structured output is designed to match [@marianmeres/condition-builder] dump
+The parsed structured output is designed to match [condition-builder](https://github.com/marianmeres/condition-builder) dump
 format, so the two play nicely together.
 
 ## Installation
@@ -85,7 +85,7 @@ const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
 
 ## Combine with condition-builder
 
-See [@marianmeres/condition-builder](https://github.com/marianmeres/condition-builder) for
+See [condition-builder](https://github.com/marianmeres/condition-builder) for
 more.
 
 ```ts
