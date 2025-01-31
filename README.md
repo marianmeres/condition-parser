@@ -50,7 +50,7 @@ You can join multiple ones with `and` or `or`. The default `and` can be omitted:
 is parsed as (omitting the internal structure here)
 
 ```ts
-foo=bar and baz=bat or hey=ho
+"foo=bar and baz=bat or hey=ho"
 ```
 
 You can use parentheses to logically group the expressions or quotes inside the
