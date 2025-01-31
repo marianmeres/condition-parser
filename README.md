@@ -30,9 +30,9 @@ import { ConditionParser } from "@marianmeres/condition-parser";
 The core parsable expression:
 
 ```ts
-key: operator: value;
+"key:operator:value"
 // or (if the operator is omitted the default "eq" will be used)
-key: value;
+"key:value"
 ```
 
 is parsed internally as
@@ -44,7 +44,7 @@ is parsed internally as
 You can join multiple ones with `and` or `or`. The default `and` can be omitted:
 
 ```ts
-foo:bar baz:bat or hey:ho
+"foo:bar baz:bat or hey:ho"
 ```
 
 is parsed as (omitting the internal structure here)
@@ -57,10 +57,10 @@ You can use parentheses to logically group the expressions or quotes inside the
 identifiers:
 
 ```ts
-"my key":'my operator':"my \" value with quotes" and (foo:<:bar or baz:>:bat)
+`"my key":'my operator':"my \" value with quotes" and (foo:<:bar or baz:>:bat)`
 ```
 
-You can add unparsable content which will be preserved:
+You can append arbitrary unparsable content which will be preserved:
 
 ```ts
 const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
