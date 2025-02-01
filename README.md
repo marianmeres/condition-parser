@@ -1,9 +1,9 @@
 # @marianmeres/condition-parser
 
-Human friendly conditions notation parser. Similar to Gmail's "Search email" input.
+Human friendly search conditions notation parser. Somewhat similar to Gmail "Search email" input.
 
-The parsed structured output is designed to match [condition-builder](https://github.com/marianmeres/condition-builder) dump
-format, so the two play nicely together.
+The parsed output is designed to match [condition-builder](https://github.com/marianmeres/condition-builder) 
+dump format, so the two play nicely together.
 
 ## Installation
 
@@ -30,37 +30,38 @@ import { ConditionParser } from "@marianmeres/condition-parser";
 The core parsable expression:
 
 ```ts
-"key:operator:value"
-// or (if the operator is omitted the default "eq" will be used)
+// for the default "equals" (short "eq") operator
 "key:value"
+// or with custom operator
+"key:operator:value"
 ```
 
 is parsed internally as
 
 ```ts
-{ key: "key", operator: "eq", value: "value" }
+{ key: "key", operator: "operator", value: "value" }
 ```
 
-You can join multiple ones with `and` or `or`. The default `and` can be omitted:
+You can join multiple ones with `and` or `or`. The default `and` can be omitted, so:
 
 ```ts
-"foo:bar baz:bat or hey:ho"
+"foo:bar baz:bat or hey:ho 'let\'s':go"
 ```
 
-is parsed as (omitting the internal structure here)
+is equivalent to
 
 ```ts
-"foo=bar and baz=bat or hey=ho"
+"foo:bar and baz:bat or hey:ho and 'let\'s':go"
 ```
 
-You can use parentheses to logically group the expressions or quotes inside the
-identifiers:
+You can use parentheses to logically group the expressions. 
+You can use escaped quotes (or colons) inside the identifiers:
 
 ```ts
-`"my key":'my operator':"my \" value with quotes" and (foo:<:bar or baz:>:bat)`
+`"my key":'my \: operator':"my \" value with quotes" and (foo:<:bar or baz:>:bat)`
 ```
 
-You can append arbitrary unparsable content which will be preserved:
+Also, you can append arbitrary unparsable content which will be preserved:
 
 ```ts
 const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
@@ -83,10 +84,9 @@ const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
 }
 ```
 
-## Combine with condition-builder
+## In friends harmony with condition-builder
 
-See [condition-builder](https://github.com/marianmeres/condition-builder) for
-more.
+See [condition-builder](https://github.com/marianmeres/condition-builder) for more.
 
 ```ts
 import { ConditionParser } from "@marianmeres/condition-parser";
