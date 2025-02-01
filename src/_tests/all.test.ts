@@ -2,7 +2,10 @@
 
 import { ConditionParser } from "../parser.ts";
 import { assertEquals } from "@std/assert";
-import { Condition, type ExpressionContext } from "@marianmeres/condition-builder";
+import {
+	Condition,
+	type ExpressionContext,
+} from "@marianmeres/condition-builder";
 
 // [
 // 	{
@@ -264,7 +267,7 @@ DATA.forEach(
 					const { parsed: actual, unparsed } = ConditionParser.parse(
 						input,
 						undefined,
-						debug,
+						debug
 					);
 					// console.log(`---\n${input}\nactual`, actual);
 					// console.log("expected", expected);
@@ -278,11 +281,11 @@ DATA.forEach(
 				only,
 			});
 		}
-	},
+	}
 );
 
 Deno.test("combine with condition-builder", () => {
-	const userSearchInput = "size:<:1M folder:inbox foo bar";
+	const userSearchInput = '(folder:"my projects" or folder:inbox) foo bar';
 
 	// see https://github.com/marianmeres/condition-builder
 	const options = {
@@ -295,11 +298,11 @@ Deno.test("combine with condition-builder", () => {
 
 	const c = new Condition(options);
 	c.and("user_id", "eq", 123).and(
-		Condition.restore(parsed, options).and("text", "match", unparsed),
+		Condition.restore(parsed, options).and("text", "match", unparsed)
 	);
 
 	assertEquals(
-		`"user_id"='123' and ("size"<'1M' and "folder"='inbox' and "text"~*'foo bar')`,
-		c.toString(),
+		`"user_id"='123' and (("folder"='my projects' or "folder"='inbox') and "text"~*'foo bar')`,
+		c.toString()
 	);
 });

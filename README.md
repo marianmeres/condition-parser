@@ -92,7 +92,7 @@ more.
 import { ConditionParser } from "@marianmeres/condition-parser";
 import { Condition } from "@marianmeres/condition-builder";
 
-const userSearchInput = "size:<:1M folder:inbox foo bar";
+const userSearchInput = '(folder:"my projects" or folder:inbox) foo bar';
 
 const options = {
 	renderKey: (ctx) => `"${ctx.key.replaceAll('"', '""')}"`,
@@ -108,7 +108,7 @@ c.and("user_id", "eq", 123).and(
 );
 
 assertEquals(
-	`"user_id"='123' and ("size"<'1M' and "folder"='inbox' and "text"~*'foo bar')`,
+	`"user_id"='123' and (("folder"='my projects' or "folder"='inbox') and "text"~*'foo bar')`,
 	c.toString(),
 );
 ```
