@@ -7,13 +7,6 @@ import {
 	type ExpressionContext,
 } from "@marianmeres/condition-builder";
 
-// [
-// 	{
-// 		operator: "and",
-// 		expression: { key: "a", operator: "eq", value: "b" },
-// 	},
-// ];
-
 const DATA: {
 	input: string;
 	expected: any;
@@ -255,6 +248,11 @@ const DATA: {
 		],
 		expectedUnparsed: "this is free text",
 		// only: true,
+	},
+	{
+		input: "only unparsable",
+		expected: [],
+		expectedUnparsed: "only unparsable",
 	},
 ];
 
