@@ -79,7 +79,7 @@ export class ConditionParser {
 	}
 
 	/** Will parse the currently ahead quoted block with escape support.
-	 * Supports bot single ' and double " quotes. */
+	 * Supports both single ' and double " quotes. */
 	#parseQuotedString(): string {
 		this.#debug("parseQuotedString:start");
 		// sanity
@@ -154,7 +154,7 @@ export class ConditionParser {
 		return result;
 	}
 
-	/** Will parse the key:operato:value segment */
+	/** Will parse the key:operator:value segment */
 	#parseBasicExpression(
 		out: ConditionDump,
 		currentOperator: ConditionJoinOperator

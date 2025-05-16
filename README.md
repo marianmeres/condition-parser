@@ -112,3 +112,7 @@ assertEquals(
 	c.toString(),
 );
 ```
+
+## Related
+
+[@marianmeres/condition-builder](https://github.com/marianmeres/condition-builder)
