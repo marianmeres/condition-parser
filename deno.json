@@ -3,7 +3,8 @@
 	"version": "1.0.2",
 	"exports": "./src/mod.ts",
 	"tasks": {
-		"test": "deno test --watch"
+		"test": "deno test --watch",
+		"test:no-watch": "deno test"
 	},
 	"imports": {
 		"@marianmeres/condition-builder": "jsr:@marianmeres/condition-builder@^1.5.2",
