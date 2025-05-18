@@ -1,11 +1,11 @@
 // deno-lint-ignore-file no-explicit-any
 
-import { ConditionParser } from "../parser.ts";
-import { assertEquals } from "@std/assert";
 import {
 	Condition,
 	type ExpressionContext,
 } from "@marianmeres/condition-builder";
+import { assertEquals } from "@std/assert";
+import { ConditionParser } from "../parser.ts";
 
 const clog = console.log;
 
@@ -409,4 +409,25 @@ Deno.test("pre add hook", () => {
 		Condition.restore(r.parsed).toString(),
 		"1=1 and (1=1 or foo=boo)"
 	);
+});
+
+Deno.test("restore input", () => {
+	const originalInput = "foo:eq:bar";
+
+	const originalWhere = new Condition().and(
+		Condition.restore(ConditionParser.parse(originalInput).parsed)
+	);
+
+	const restoredInput = originalWhere.toString({
+		renderOperator(ctx: ExpressionContext) {
+			return `:${ctx.operator}:`;
+		},
+	});
+
+	assertEquals(restoredInput, `(${originalInput})`);
+
+	const res = ConditionParser.parse(restoredInput);
+	const restoredWhere = new Condition().and(Condition.restore(res.parsed));
+
+	assertEquals(originalWhere, restoredWhere);
 });
