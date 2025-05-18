@@ -17,6 +17,7 @@ interface Context {
 	value: any;
 }
 
+/** ConditionParser.parse options */
 export interface ConditionParserOptions {
 	defaultOperator: string;
 	debug: boolean;
