@@ -64,7 +64,11 @@ You can use escaped quotes (or colons) inside the identifiers:
 Also, you can append arbitrary unparsable content which will be preserved:
 
 ```ts
-const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
+const result = ConditionParser.parse(
+    "a:b and (c:d or e:f) this is free text", 
+    options: Partial<ConditionParserOptions> // read below
+);
+
 // result is now:
 {
     parsed: [
@@ -82,6 +86,20 @@ const result = ConditionParser.parse("a:b and (c:d or e:f) this is free text");
     ],
     unparsed: "this is free text"
 }
+
+// supported ConditionParser.parse options:
+export interface ConditionParserOptions {
+    /** Operator is optional. If not present will default to this option, which is by default "eq" */
+    defaultOperator: string;
+    /** Will print debug info to console. Defaults to false */
+    debug: boolean;
+    /** If provided, will use the output of this fn as a final parsed expression output. */
+    transform: (context: Context) => Context;
+    /** Applied as the last step before adding the currently parsed expression. 
+     * If returns falsey, will skip adding the currently parsed expression. */
+    preAddHook: (context: Context) => null | undefined | Context;
+}
+
 ```
 
 ## In friends harmony with condition-builder

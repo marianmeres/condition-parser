@@ -7,6 +7,8 @@ import {
 	type ExpressionContext,
 } from "@marianmeres/condition-builder";
 
+const clog = console.log;
+
 const DATA: {
 	input: string;
 	expected: any;
@@ -308,7 +310,7 @@ DATA.forEach(
 						parsed: actual,
 						unparsed,
 						meta,
-					} = ConditionParser.parse(input, undefined, debug);
+					} = ConditionParser.parse(input, { debug });
 					// console.log(`---\n${input}\nactual`, actual);
 					// console.log("expected", expected);
 					// console.log("unparsed:", unparsed);
@@ -348,5 +350,63 @@ Deno.test("combine with condition-builder", () => {
 	assertEquals(
 		`"user_id"='123' and (("folder"='my projects' or "folder"='inbox') and "text"~*'foo bar')`,
 		c.toString()
+	);
+});
+
+Deno.test("transform", () => {
+	const { parsed, unparsed } = ConditionParser.parse("FOO:bar", {
+		transform: (ctx) => {
+			ctx.key = ctx.key.toLowerCase();
+			ctx.value = ctx.value.toUpperCase();
+			return ctx;
+		},
+	});
+
+	assertEquals(parsed[0].expression?.key, "foo");
+	assertEquals(parsed[0].expression?.value, "BAR");
+});
+
+Deno.test("pre add hook", () => {
+	const other = new Condition();
+	const options = {
+		preAddHook: (ctx: any) => {
+			// accept only foo here...
+			if (ctx.key === "foo") return ctx;
+
+			// everything else use for other
+			other.and(ctx.key, ctx.operator, ctx.value);
+		},
+	};
+
+	let r = ConditionParser.parse("foo:bar baz:bat", options);
+	// clog(r);
+
+	// bar is skipped, and moved to second
+	assertEquals(r.parsed, [
+		{
+			expression: { key: "foo", operator: "eq", value: "bar" },
+			operator: "and",
+			condition: undefined,
+		},
+		{
+			expression: { key: "1", operator: "eq", value: "1" },
+			operator: "and",
+			condition: undefined,
+		},
+	]);
+	assertEquals(Condition.restore(r.parsed).toString(), "foo=bar and 1=1");
+
+	assertEquals(other.toJSON(), [
+		{
+			operator: "and",
+			expression: { key: "baz", operator: "eq", value: "bat" },
+		},
+	]);
+
+	//
+	r = ConditionParser.parse("bar:bat and (ha:ho or foo:boo)", options);
+	assertEquals(
+		Condition.restore(r.parsed).toString(),
+		"1=1 and (1=1 or foo=boo)"
 	);
 });

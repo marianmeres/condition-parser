@@ -11,6 +11,22 @@ interface Meta {
 	values: any[];
 }
 
+interface Context {
+	key: string;
+	operator: string;
+	value: any;
+}
+
+export interface ConditionParserOptions {
+	defaultOperator: string;
+	debug: boolean;
+	/** If provided, will use the output of this fn as a final parsed expression. */
+	transform: (context: Context) => Context;
+	/** Applied as a last step before adding. If returns falsey, will effectively skip
+	 * adding. */
+	preAddHook: (context: Context) => null | undefined | Context;
+}
+
 /**
  * Human friendly conditions notation parser. See README.md for examples.
  *
@@ -36,13 +52,23 @@ export class ConditionParser {
 		values: new Set<any>([]),
 	};
 
+	#transform: ConditionParserOptions["transform"];
+
+	#preAddHook: undefined | ConditionParserOptions["preAddHook"];
+
 	private constructor(
 		input: string,
-		defaultOperator = ConditionParser.DEFAULT_OPERATOR,
-		debug?: boolean
+		options: Partial<ConditionParserOptions> = {}
 	) {
 		input = `${input}`.trim();
 		if (!input) throw new TypeError(`Expecting non empty input`);
+
+		const {
+			defaultOperator = ConditionParser.DEFAULT_OPERATOR,
+			debug = false,
+			transform = (c: Context) => c,
+			preAddHook,
+		} = options ?? {};
 
 		this.#input = input;
 		this.#length = input.length;
@@ -50,6 +76,11 @@ export class ConditionParser {
 		this.#debugEnabled = !!debug;
 
 		this.#debug(`[ ${this.#input} ]`, this.#defaultOperator);
+
+		this.#transform = transform;
+		if (typeof preAddHook === "function") {
+			this.#preAddHook = preAddHook;
+		}
 	}
 
 	/** Will log debug info if `this.#debugEnabled` */
@@ -222,17 +253,35 @@ export class ConditionParser {
 			}
 		}
 
-		this.#meta.keys.add(key);
-		this.#meta.operators.add(operator);
-		this.#meta.values.add(value);
+		let expression: undefined | null | Context = this.#transform?.({
+			key,
+			operator,
+			value,
+		}) ?? {
+			key,
+			operator,
+			value,
+		};
 
-		const expression = { key, operator, value };
+		if (typeof this.#preAddHook === "function") {
+			expression = this.#preAddHook(expression);
+			// return early if hook returned falsey
+			if (!expression) {
+				this.#debug("parseBasicExpression:preAddHook truthy skip...");
+				expression = { key: "1", operator: this.#defaultOperator, value: "1" };
+			}
+		}
+
 		const result = {
 			expression,
 			operator: currentOperator,
 			condition: undefined,
 		};
 		this.#debug("parseBasicExpression:result", result);
+
+		this.#meta.keys.add(expression.key);
+		this.#meta.operators.add(expression.operator);
+		this.#meta.values.add(expression.value);
 
 		out.push(result);
 	}
@@ -338,10 +387,9 @@ export class ConditionParser {
 	/** Main api. Will parse the provided input. */
 	static parse(
 		input: string,
-		defaultOperator?: string,
-		debug?: boolean
+		options: Partial<ConditionParserOptions> = {}
 	): { parsed: ConditionDump; unparsed: string; meta: Meta } {
-		const parser = new ConditionParser(input, defaultOperator, debug);
+		const parser = new ConditionParser(input, options);
 
 		let parsed: ConditionDump = [];
 		let unparsed = "";
