@@ -3,6 +3,7 @@
 import type {
 	ConditionDump,
 	ConditionJoinOperator,
+	ExpressionContext,
 } from "@marianmeres/condition-builder";
 
 interface Meta {
@@ -11,21 +12,17 @@ interface Meta {
 	values: any[];
 }
 
-interface Context {
-	key: string;
-	operator: string;
-	value: any;
-}
-
 /** ConditionParser.parse options */
 export interface ConditionParserOptions {
 	defaultOperator: string;
 	debug: boolean;
 	/** If provided, will use the output of this fn as a final parsed expression. */
-	transform: (context: Context) => Context;
+	transform: (context: ExpressionContext) => ExpressionContext;
 	/** Applied as a last step before adding. If returns falsey, will effectively skip
 	 * adding. */
-	preAddHook: (context: Context) => null | undefined | Context;
+	preAddHook: (
+		context: ExpressionContext
+	) => null | undefined | ExpressionContext;
 }
 
 /**
@@ -67,7 +64,7 @@ export class ConditionParser {
 		const {
 			defaultOperator = ConditionParser.DEFAULT_OPERATOR,
 			debug = false,
-			transform = (c: Context) => c,
+			transform = (c: ExpressionContext) => c,
 			preAddHook,
 		} = options ?? {};
 
@@ -254,7 +251,7 @@ export class ConditionParser {
 			}
 		}
 
-		let expression: undefined | null | Context = this.#transform?.({
+		let expression: undefined | null | ExpressionContext = this.#transform?.({
 			key,
 			operator,
 			value,
