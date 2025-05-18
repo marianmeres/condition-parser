@@ -5,6 +5,12 @@ import type {
 	ConditionJoinOperator,
 } from "@marianmeres/condition-builder";
 
+interface Meta {
+	keys: string[];
+	operators: string[];
+	values: any[];
+}
+
 /**
  * Human friendly conditions notation parser. See README.md for examples.
  *
@@ -23,6 +29,12 @@ export class ConditionParser {
 	#defaultOperator: string;
 	#debugEnabled: boolean = false;
 	#depth: number = -1;
+
+	#meta = {
+		keys: new Set<string>([]),
+		operators: new Set<string>([]),
+		values: new Set<any>([]),
+	};
 
 	private constructor(
 		input: string,
@@ -210,6 +222,10 @@ export class ConditionParser {
 			}
 		}
 
+		this.#meta.keys.add(key);
+		this.#meta.operators.add(operator);
+		this.#meta.values.add(value);
+
 		const expression = { key, operator, value };
 		const result = {
 			expression,
@@ -324,7 +340,7 @@ export class ConditionParser {
 		input: string,
 		defaultOperator?: string,
 		debug?: boolean
-	): { parsed: ConditionDump; unparsed: string } {
+	): { parsed: ConditionDump; unparsed: string; meta: Meta } {
 		const parser = new ConditionParser(input, defaultOperator, debug);
 
 		let parsed: ConditionDump = [];
@@ -338,6 +354,14 @@ export class ConditionParser {
 			unparsed = parser.#input.slice(parser.#pos);
 		}
 
-		return { parsed, unparsed };
+		return {
+			parsed,
+			unparsed,
+			meta: {
+				keys: [...parser.#meta.keys],
+				operators: [...parser.#meta.operators],
+				values: [...parser.#meta.values],
+			},
+		};
 	}
 }

@@ -11,6 +11,7 @@ const DATA: {
 	input: string;
 	expected: any;
 	expectedUnparsed?: string;
+	expectedMeta?: any;
 	only?: boolean;
 	name?: string;
 	skip?: boolean;
@@ -25,6 +26,33 @@ const DATA: {
 				condition: undefined,
 			},
 		],
+		expectedMeta: {
+			keys: ["foo"],
+			operators: ["eq"],
+			values: ["bar"],
+		},
+		// only: true,
+		// debug: true,
+	},
+	{
+		input: "foo:bar foo:bar",
+		expected: [
+			{
+				expression: { key: "foo", operator: "eq", value: "bar" },
+				operator: "and",
+				condition: undefined,
+			},
+			{
+				expression: { key: "foo", operator: "eq", value: "bar" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedMeta: {
+			keys: ["foo"],
+			operators: ["eq"],
+			values: ["bar"],
+		},
 		// only: true,
 		// debug: true,
 	},
@@ -191,6 +219,11 @@ const DATA: {
 				expression: undefined,
 			},
 		],
+		expectedMeta: {
+			keys: ["a", "c", "e", "g", "i", "k"],
+			operators: ["eq"],
+			values: ["b", "d", "f", "h", "j", "l"],
+		},
 		// only: true,
 	},
 	{
@@ -257,23 +290,36 @@ const DATA: {
 ];
 
 DATA.forEach(
-	({ name, input, expected, only, skip, debug, expectedUnparsed }) => {
+	({
+		name,
+		input,
+		expected,
+		only,
+		skip,
+		debug,
+		expectedUnparsed,
+		expectedMeta,
+	}) => {
 		if (!skip) {
 			Deno.test({
 				name: name || input,
 				fn: () => {
-					const { parsed: actual, unparsed } = ConditionParser.parse(
-						input,
-						undefined,
-						debug
-					);
+					const {
+						parsed: actual,
+						unparsed,
+						meta,
+					} = ConditionParser.parse(input, undefined, debug);
 					// console.log(`---\n${input}\nactual`, actual);
 					// console.log("expected", expected);
 					// console.log("unparsed:", unparsed);
+					// console.log("meta:", meta);
 
 					assertEquals(actual, expected);
 					if (expectedUnparsed !== undefined) {
 						assertEquals(unparsed, expectedUnparsed);
+					}
+					if (expectedMeta !== undefined) {
+						assertEquals(meta, expectedMeta);
 					}
 				},
 				only,
