@@ -7,6 +7,8 @@ import { ConditionParser } from "../parser.ts";
 
 const clog = console.log;
 
+// ConditionParser.DEBUG = true;
+
 const DATA: {
 	input: string;
 	expected: any;
@@ -287,6 +289,60 @@ const DATA: {
 		expected: [],
 		expectedUnparsed: "only unparsable",
 	},
+	{
+		input: "foo:(bar)",
+		expected: [
+			{
+				expression: { key: "foo", operator: "eq", value: "bar" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: undefined,
+		// only: true,
+	},
+	{
+		input: "foo:eq:(bar)", //
+		expected: [
+			{
+				expression: { key: "foo", operator: "eq", value: "bar" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: undefined,
+		// only: true,
+	},
+	{
+		input: "foo:(eq):(bar)", // BAD, NOT ALLOWED PARENTHESIZED OPERATOR
+		expected: [],
+		expectedUnparsed: "foo:(eq):(bar)",
+		// only: true,
+	},
+	{
+		input: "foo:eq:(ba\\)r)", //
+		expected: [
+			{
+				expression: { key: "foo", operator: "eq", value: "ba)r" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: undefined,
+		// only: true,
+	},
+	{
+		input: "foo:eq:(bar))", //
+		expected: [
+			{
+				expression: { key: "foo", operator: "eq", value: "bar" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: ")",
+		// only: true,
+	},
 ];
 
 DATA.forEach(
@@ -313,13 +369,15 @@ DATA.forEach(
 					// console.log("expected", expected);
 					// console.log("unparsed:", unparsed);
 					// console.log("meta:", meta);
+					// console.log("meta:", meta);
 
-					assertEquals(actual, expected);
-					if (expectedUnparsed !== undefined) {
-						assertEquals(unparsed, expectedUnparsed);
+					assertEquals(actual, expected, "(main assert)");
+
+					if (unparsed || expectedUnparsed) {
+						assertEquals(unparsed, expectedUnparsed, "(unparsed assert)");
 					}
 					if (expectedMeta !== undefined) {
-						assertEquals(meta, expectedMeta);
+						assertEquals(meta, expectedMeta, "(meta assert)");
 					}
 				},
 				only,
@@ -429,3 +487,13 @@ Deno.test("restore input", () => {
 
 	assertEquals(originalWhere, restoredWhere);
 });
+
+// Deno.test.only("debug", () => {
+// 	let r;
+
+// 	// r = ConditionParser.parse("(foo:(bar))))", { debug: true });
+// 	// console.log(r);
+
+// 	r = ConditionParser.parse(" (  ( (foo:bar)))", { debug: true });
+// 	console.log(r);
+// });

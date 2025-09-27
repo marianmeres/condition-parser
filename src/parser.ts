@@ -34,6 +34,7 @@ export interface ConditionParserOptions {
  */
 export class ConditionParser {
 	static DEFAULT_OPERATOR = "eq";
+	static DEBUG = false;
 
 	#input: string;
 	#pos: number = 0;
@@ -81,7 +82,7 @@ export class ConditionParser {
 
 	/** Will log debug info if `this.#debugEnabled` */
 	#debug(...args: any[]) {
-		if (this.#debugEnabled) {
+		if (ConditionParser.DEBUG || this.#debugEnabled) {
 			if (this.#depth > 0) {
 				args = ["->".repeat(this.#depth), ...args];
 			}
@@ -112,9 +113,42 @@ export class ConditionParser {
 		return /['"]/.test(this.#peek());
 	}
 
+	#isOpeningParenthesisAhead(): boolean {
+		return this.#peek() === "(";
+	}
+
 	/** Will test if is at the "end of file" (end of string) */
 	#isEOF(): boolean {
 		return this.#pos >= this.#length;
+	}
+
+	#parseParenthesizedValue(): string {
+		this.#debug("parseParenthesizedValue:start");
+		// sanity
+		if (this.#peek() !== "(") {
+			throw new Error("Not parenthesized string");
+		}
+		// Consume opening (
+		this.#consume();
+
+		let result = "";
+		const closing = ")";
+
+		while (this.#pos < this.#length) {
+			const char = this.#consume();
+			if (char === closing && this.#peek(-2) !== "\\") {
+				this.#debug("parseParenthesizedValue:result", result, this.#peek());
+				return result;
+			}
+			if (char === "\\" && this.#peek() === closing) {
+				result += closing;
+				this.#consume(); // Skip the escaped char
+			} else {
+				result += char;
+			}
+		}
+
+		throw new Error("Unterminated parenthesized string");
 	}
 
 	/** Will parse the currently ahead quoted block with escape support.
@@ -175,8 +209,10 @@ export class ConditionParser {
 	}
 
 	/** Will parse the "and" or "or" logical operator */
-	#parseConditionOperator(): ConditionJoinOperator | null {
-		this.#debug("parseConditionOperator:start");
+	#parseConditionOperator(
+		openingParenthesesLevel?: number
+	): ConditionJoinOperator | null {
+		this.#debug("parseConditionOperator:start", this.#peek());
 		this.#consumeWhitespace();
 		const remaining = this.#input.slice(this.#pos);
 		let result: ConditionJoinOperator | null = null;
@@ -187,6 +223,14 @@ export class ConditionParser {
 		} else if (/^or /i.test(remaining)) {
 			this.#pos += 3;
 			result = "or";
+		} else if (openingParenthesesLevel !== undefined) {
+			const preLevel = openingParenthesesLevel;
+			const postLevel = this.#countSameCharsAhead(")");
+			if (preLevel !== postLevel) {
+				throw new Error(
+					`Parentheses level mismatch (${preLevel}, ${postLevel})`
+				);
+			}
 		}
 
 		this.#debug("parseConditionOperator:result", result);
@@ -221,9 +265,13 @@ export class ConditionParser {
 		// Check if we have an operator
 		let operator = this.#defaultOperator;
 		let value;
+		let wasParenthesized = false;
 
 		// Try to parse as if we have an operator
-		if (this.#isQuoteAhead()) {
+		if (this.#isOpeningParenthesisAhead()) {
+			wasParenthesized = true;
+			value = this.#parseParenthesizedValue();
+		} else if (this.#isQuoteAhead()) {
 			value = this.#parseQuotedString();
 		} else {
 			value = this.#parseUnquotedString();
@@ -233,16 +281,20 @@ export class ConditionParser {
 
 		// If we find a colon, what we parsed was actually an operator
 		if (this.#peek() === ":") {
+			if (wasParenthesized) {
+				this.#pos = _startPos;
+				throw new Error("Operator cannot be a parenthesized expression");
+			}
 			operator = value;
 			this.#consume(); // consume the second colon
 			this.#consumeWhitespace();
 
 			// Parse the actual value
-			if (this.#peek() === "(") {
-				this.#pos = _startPos;
-				throw new Error("Value cannot be a parenthesized expression");
-			}
-			if (this.#isQuoteAhead()) {
+			if (this.#isOpeningParenthesisAhead()) {
+				// this.#pos = _startPos;
+				// throw new Error("Value cannot be a parenthesized expression");
+				value = this.#parseParenthesizedValue();
+			} else if (this.#isQuoteAhead()) {
 				value = this.#parseQuotedString();
 			} else {
 				value = this.#parseUnquotedString();
@@ -319,7 +371,7 @@ export class ConditionParser {
 
 	/** Will parse either basic or parenthesized term based on look ahead */
 	#parseTerm(out: ConditionDump, currentOperator: ConditionJoinOperator) {
-		this.#debug("parseTerm", currentOperator);
+		this.#debug("parseTerm:start", currentOperator, this.#peek());
 		this.#consumeWhitespace();
 
 		// decision point
@@ -328,15 +380,34 @@ export class ConditionParser {
 		} else {
 			this.#parseBasicExpression(out, currentOperator);
 		}
+
+		this.#debug("parseTerm:end", this.#peek());
+	}
+
+	/** will count how many same exact consequent `char`s are ahead (excluding whitespace) */
+	#countSameCharsAhead(char: string) {
+		const posBkp = this.#pos;
+		let count = 0;
+		let next = this.#consume();
+		while (next === char) {
+			count++;
+			this.#consumeWhitespace();
+			next = this.#consume();
+		}
+		this.#pos = posBkp;
+		return count;
 	}
 
 	/** Parses sequences of terms connected by logical operators (and/or) */
 	#parseCondition(
 		out: ConditionDump,
-		conditionOperator: ConditionJoinOperator
+		conditionOperator: ConditionJoinOperator,
+		openingParenthesesLevel?: number
 	): ConditionDump {
 		this.#depth++;
-		this.#debug("parseCondition:start", conditionOperator);
+		this.#consumeWhitespace();
+
+		this.#debug("parseCondition:start", conditionOperator, this.#peek());
 
 		// Parse first term
 		this.#parseTerm(out, conditionOperator);
@@ -345,7 +416,9 @@ export class ConditionParser {
 		while (true) {
 			this.#consumeWhitespace();
 
-			conditionOperator = this.#parseConditionOperator()!;
+			conditionOperator = this.#parseConditionOperator(
+				openingParenthesesLevel
+			)!;
 
 			// no recognized condition
 			if (!conditionOperator) {
@@ -369,6 +442,7 @@ export class ConditionParser {
 			try {
 				this.#parseTerm(out, conditionOperator);
 			} catch (e) {
+				this.#debug(`${e}`);
 				// restore
 				out.at(-1)!.operator = _previousBkp;
 				// and catch unparsed below
@@ -390,10 +464,13 @@ export class ConditionParser {
 		let parsed: ConditionDump = [];
 		let unparsed = "";
 
+		const openingLevel = parser.#countSameCharsAhead("(");
+
 		try {
 			// Start with the highest-level logical expression
-			parsed = parser.#parseCondition(parsed, "and");
+			parsed = parser.#parseCondition(parsed, "and", openingLevel);
 		} catch (_e) {
+			if (options.debug) parser.#debug(`${_e}`);
 			// collect trailing unparsed input
 			unparsed = parser.#input.slice(parser.#pos);
 		}
