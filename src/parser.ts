@@ -128,6 +128,7 @@ export class ConditionParser {
 		if (this.#peek() !== "(") {
 			throw new Error("Not parenthesized string");
 		}
+
 		// Consume opening (
 		this.#consume();
 
@@ -138,6 +139,7 @@ export class ConditionParser {
 			const char = this.#consume();
 			if (char === closing && this.#peek(-2) !== "\\") {
 				this.#debug("parseParenthesizedValue:result", result, this.#peek());
+
 				return result;
 			}
 			if (char === "\\" && this.#peek() === closing) {
@@ -396,6 +398,19 @@ export class ConditionParser {
 		}
 		this.#pos = posBkp;
 		return count;
+	}
+
+	#moveToFirstMatch(regex: RegExp) {
+		let bkp = this.#pos;
+		let next = this.#consume();
+		let match = next && regex.test(next);
+		while (match) {
+			this.#consumeWhitespace();
+			bkp = this.#pos;
+			next = this.#consume();
+			match = next && regex.test(next);
+		}
+		this.#pos = bkp;
 	}
 
 	/** Parses sequences of terms connected by logical operators (and/or) */

@@ -490,10 +490,12 @@ Deno.test("restore input", () => {
 
 // Deno.test.only("debug", () => {
 // 	let r;
+// 	r = ConditionParser.parse("foo:((bar))", { debug: true });
+// 	console.log(r);
 
 // 	// r = ConditionParser.parse("(foo:(bar))))", { debug: true });
 // 	// console.log(r);
 
-// 	r = ConditionParser.parse(" (  ( (foo:bar)))", { debug: true });
-// 	console.log(r);
+// 	// r = ConditionParser.parse(" (  ( (foo:bar)))", { debug: true });
+// 	// console.log(r);
 // });
