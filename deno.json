@@ -4,7 +4,9 @@
 	"exports": "./src/mod.ts",
 	"tasks": {
 		"test": "deno test --watch",
-		"test:no-watch": "deno test"
+		"test:no-watch": "deno test",
+		"npm:build": "deno run -A scripts/build-npm.ts",
+		"npm:publish": "deno run -A scripts/build-npm.ts && cd ./.npm-dist && npm publish --access=public"
 	},
 	"imports": {
 		"@marianmeres/condition-builder": "jsr:@marianmeres/condition-builder@^1.8.0",
