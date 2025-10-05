@@ -4,10 +4,17 @@ import type {
 	ExpressionContext,
 } from "@marianmeres/condition-builder";
 
+interface ExpressionData {
+	key: string;
+	operator: string;
+	value: string;
+}
+
 interface Meta {
 	keys: string[];
 	operators: string[];
 	values: any[];
+	expressions: ExpressionData[];
 }
 
 /** ConditionParser.parse options */
@@ -47,6 +54,7 @@ export class ConditionParser {
 		keys: new Set<string>([]),
 		operators: new Set<string>([]),
 		values: new Set<any>([]),
+		expressions: new Set<string>([]),
 	};
 
 	#transform: ConditionParserOptions["transform"];
@@ -333,6 +341,11 @@ export class ConditionParser {
 		this.#meta.operators.add(expression.operator);
 		this.#meta.values.add(expression.value);
 
+		// need to make it unique... so just quick-n-dirty
+		this.#meta.expressions.add(
+			JSON.stringify([expression.key, expression.operator, expression.value])
+		);
+
 		out.push(result);
 	}
 
@@ -497,6 +510,10 @@ export class ConditionParser {
 				keys: [...parser.#meta.keys],
 				operators: [...parser.#meta.operators],
 				values: [...parser.#meta.values],
+				expressions: [...parser.#meta.expressions].map((v) => {
+					const [key, operator, value] = JSON.parse(v);
+					return { key, operator, value };
+				}),
 			},
 		};
 	}
