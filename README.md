@@ -16,7 +16,7 @@ deno add jsr:@marianmeres/condition-parser
 nodejs
 
 ```sh
-npx jsr add @marianmeres/condition-parser
+npm i @marianmeres/condition-parser
 ```
 
 ## Usage

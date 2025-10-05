@@ -3,7 +3,7 @@ import {
 	type ExpressionContext,
 } from "@marianmeres/condition-builder";
 import { assertEquals } from "@std/assert";
-import { ConditionParser } from "../parser.ts";
+import { ConditionParser } from "../src/parser.ts";
 
 const clog = console.log;
 
