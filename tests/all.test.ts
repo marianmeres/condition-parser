@@ -498,6 +498,15 @@ Deno.test("restore input", () => {
 	assertEquals(originalWhere, restoredWhere);
 });
 
+Deno.test("parse empty", () => {
+	const r = ConditionParser.parse("");
+	assertEquals(r, {
+		parsed: [],
+		unparsed: "",
+		meta: { keys: [], operators: [], values: [], expressions: [] },
+	});
+});
+
 // Deno.test.only("debug", () => {
 // 	let r;
 // 	r = ConditionParser.parse("foo:((bar))", { debug: true });

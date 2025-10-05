@@ -66,7 +66,9 @@ export class ConditionParser {
 		options: Partial<ConditionParserOptions> = {}
 	) {
 		input = `${input}`.trim();
-		if (!input) throw new TypeError(`Expecting non empty input`);
+
+		// removing this... makes no sense
+		// if (!input) throw new TypeError(`Expecting non empty input`);
 
 		const {
 			defaultOperator = ConditionParser.DEFAULT_OPERATOR,
