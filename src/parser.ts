@@ -229,12 +229,30 @@ export class ConditionParser {
 		const remaining = this.#input.slice(this.#pos);
 		let result: ConditionJoinOperator | null = null;
 
+		const _isNotAhead = (s: string) => /\s*not\s+/i.exec(s);
+
 		if (/^and /i.test(remaining)) {
 			this.#pos += 4;
 			result = "and";
+
+			// maybe followed by "not"?
+			const notIsAheadMatch = _isNotAhead(remaining);
+			if (notIsAheadMatch) {
+				// minus 1, because the initial test includes single trailing whitespace
+				this.#pos += notIsAheadMatch[0].length - 1;
+				result = "andNot";
+			}
 		} else if (/^or /i.test(remaining)) {
 			this.#pos += 3;
 			result = "or";
+
+			// maybe followed by "not"?
+			const notIsAheadMatch = _isNotAhead(remaining);
+			if (notIsAheadMatch) {
+				// minus 1, because the initial test includes single trailing whitespace
+				this.#pos += notIsAheadMatch[0].length - 1;
+				result = "orNot";
+			}
 		} else if (openingParenthesesLevel !== undefined) {
 			const preLevel = openingParenthesesLevel;
 			const postLevel = this.#countSameCharsAhead(")");

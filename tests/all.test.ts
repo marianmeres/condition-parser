@@ -507,6 +507,16 @@ Deno.test("parse empty", () => {
 	});
 });
 
+Deno.test("with not", () => {
+	const expected = "a=b and not c=d or not (e=f and not g=h)";
+
+	const r = ConditionParser.parse(expected.replaceAll("=", ":"));
+	// console.log(9999, r);
+
+	const actual = Condition.restore(r.parsed).toString();
+	assertEquals(actual, expected);
+});
+
 // Deno.test.only("debug", () => {
 // 	let r;
 // 	r = ConditionParser.parse("foo:((bar))", { debug: true });
