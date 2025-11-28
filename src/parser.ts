@@ -17,30 +17,104 @@ interface Meta {
 	expressions: ExpressionData[];
 }
 
-/** ConditionParser.parse options */
+/**
+ * Configuration options for the ConditionParser.
+ */
 export interface ConditionParserOptions {
+	/**
+	 * The default operator to use when not explicitly specified in the expression.
+	 * Defaults to "eq" (equals).
+	 * @example "contains", "eq", "gt", etc.
+	 */
 	defaultOperator: string;
+
+	/**
+	 * Enable debug logging to console. Useful for troubleshooting parser behavior.
+	 * @default false
+	 */
 	debug: boolean;
-	/** If provided, will use the output of this fn as a final parsed expression. */
+
+	/**
+	 * Transform function applied to each parsed expression before it's added to the output.
+	 * Useful for normalizing keys/values or applying custom transformations.
+	 * @param context - The parsed expression context
+	 * @returns The transformed expression context
+	 * @example
+	 * ```ts
+	 * transform: (ctx) => ({
+	 *   ...ctx,
+	 *   key: ctx.key.toLowerCase(),
+	 *   value: ctx.value.toUpperCase()
+	 * })
+	 * ```
+	 */
 	transform: (context: ExpressionContext) => ExpressionContext;
-	/** Applied as a last step before adding. If returns falsey, will effectively skip
-	 * adding. */
+
+	/**
+	 * Hook function called before adding each expression to the output.
+	 * If it returns a falsy value, the expression will be skipped.
+	 * Useful for filtering or routing expressions to different destinations.
+	 * @param context - The parsed expression context
+	 * @returns The expression context to add, or null/undefined to skip
+	 * @example
+	 * ```ts
+	 * preAddHook: (ctx) => {
+	 *   if (ctx.key === 'special') return null; // skip this
+	 *   return ctx;
+	 * }
+	 * ```
+	 */
 	preAddHook: (
 		context: ExpressionContext
 	) => null | undefined | ExpressionContext;
 }
 
 /**
- * Human friendly conditions notation parser. See README.md for examples.
+ * Human-friendly conditions notation parser for search expressions.
  *
- * Designed to play nicely with @marianmeres/condition-builder.
+ * Parses expressions like `"key:value"` or `"key:operator:value"` and supports
+ * logical operators (`and`, `or`, `and not`, `or not`), parenthesized grouping,
+ * quoted strings with escaping, and trailing unparsable content.
  *
- * Internally uses series of layered parsers, each handling a specific part of the grammar,
+ * Designed to work seamlessly with @marianmeres/condition-builder.
+ *
+ * @example
+ * Basic usage:
+ * ```ts
+ * const result = ConditionParser.parse("foo:bar and baz:bat");
+ * // result.parsed contains the parsed conditions
+ * // result.unparsed contains any trailing unparsable text
+ * ```
+ *
+ * @example
+ * Complex expressions with grouping:
+ * ```ts
+ * const result = ConditionParser.parse(
+ *   '(folder:"my projects" or folder:inbox) foo bar'
+ * );
+ * ```
+ *
+ * @example
+ * With custom operator:
+ * ```ts
+ * const result = ConditionParser.parse("age:gt:18 and status:active");
+ * ```
+ *
+ * Internally uses a series of layered parsers, each handling a specific part of the grammar,
  * with logical expressions at the top, basic expressions at the bottom, and parenthesized
  * grouping connecting them recursively.
  */
 export class ConditionParser {
+	/**
+	 * Default operator used when none is specified in the expression.
+	 * @default "eq"
+	 */
 	static DEFAULT_OPERATOR = "eq";
+
+	/**
+	 * Global debug flag. When true, all parser instances will log debug information.
+	 * @default false
+	 */
 	static DEBUG = false;
 
 	#input: string;
@@ -100,6 +174,63 @@ export class ConditionParser {
 		}
 	}
 
+	/**
+	 * Public helper for creating formatted error messages with position and context.
+	 *
+	 * Note: Prefixed with `__` to indicate this is a special-purpose public method
+	 * not intended for general use. It's exposed primarily for testing and advanced
+	 * use cases.
+	 *
+	 * @param input - The full input string being parsed
+	 * @param pos - The position where the error occurred
+	 * @param message - The error message
+	 * @param contextRadius - Number of characters to show before/after error position (default: 20)
+	 * @returns Error object with formatted message including position and context
+	 *
+	 * @example
+	 * ```ts
+	 * const error = ConditionParser.__createError(
+	 *   "foo:bar and baz:bat",
+	 *   12,
+	 *   "Unexpected character",
+	 *   20
+	 * );
+	 * // Error message includes position and visual marker
+	 * ```
+	 */
+	static __createError(
+		input: string,
+		pos: number,
+		message: string,
+		contextRadius: number = 20
+	): Error {
+		const start = Math.max(0, pos - contextRadius);
+		const end = Math.min(input.length, pos + contextRadius);
+		const snippet = input.slice(start, end);
+		const markerPos = pos - start;
+
+		const errorMsg = [
+			message,
+			`Position: ${pos}`,
+			`Context: "${snippet}"`,
+			`         ${" ".repeat(markerPos)}^`,
+		].join("\n");
+
+		return new Error(errorMsg);
+	}
+
+	/**
+	 * Creates an error message with position information and context.
+	 * Uses the public static helper internally.
+	 */
+	#createError(message: string): Error {
+		return ConditionParser.__createError(
+			this.#input,
+			this.#pos,
+			message
+		);
+	}
+
 	/** Will look ahead (if positive) or behind (if negative) based on `offset` */
 	#peek(offset: number = 0): string {
 		const at = this.#pos + offset;
@@ -136,7 +267,7 @@ export class ConditionParser {
 		this.#debug("parseParenthesizedValue:start");
 		// sanity
 		if (this.#peek() !== "(") {
-			throw new Error("Not parenthesized string");
+			throw this.#createError("Not parenthesized string");
 		}
 
 		// Consume opening (
@@ -160,7 +291,7 @@ export class ConditionParser {
 			}
 		}
 
-		throw new Error("Unterminated parenthesized string");
+		throw this.#createError("Unterminated parenthesized string");
 	}
 
 	/** Will parse the currently ahead quoted block with escape support.
@@ -169,7 +300,7 @@ export class ConditionParser {
 		this.#debug("parseQuotedString:start");
 		// sanity
 		if (!this.#isQuoteAhead()) {
-			throw new Error("Not quoted string");
+			throw this.#createError("Not quoted string");
 		}
 
 		let result = "";
@@ -190,7 +321,7 @@ export class ConditionParser {
 			}
 		}
 
-		throw new Error("Unterminated quoted string");
+		throw this.#createError("Unterminated quoted string");
 	}
 
 	/** Will parse the currently ahead unquoted block until delimiter ":", "(", ")", or \s) */
@@ -257,8 +388,8 @@ export class ConditionParser {
 			const preLevel = openingParenthesesLevel;
 			const postLevel = this.#countSameCharsAhead(")");
 			if (preLevel !== postLevel) {
-				throw new Error(
-					`Parentheses level mismatch (${preLevel}, ${postLevel})`
+				throw this.#createError(
+					`Parentheses level mismatch (opening: ${preLevel}, closing: ${postLevel})`
 				);
 			}
 		}
@@ -288,7 +419,7 @@ export class ConditionParser {
 		this.#consumeWhitespace();
 		if (this.#consume() !== ":") {
 			this.#pos = _startPos;
-			throw new Error("Expected colon after key");
+			throw this.#createError("Expected colon after key");
 		}
 		this.#consumeWhitespace();
 
@@ -313,7 +444,7 @@ export class ConditionParser {
 		if (this.#peek() === ":") {
 			if (wasParenthesized) {
 				this.#pos = _startPos;
-				throw new Error("Operator cannot be a parenthesized expression");
+				throw this.#createError("Operator cannot be a parenthesized expression");
 			}
 			operator = value;
 			this.#consume(); // consume the second colon
@@ -395,7 +526,7 @@ export class ConditionParser {
 
 		if (this.#peek() !== ")") {
 			this.#pos = _startPos;
-			throw new Error("Expected closing parenthesis");
+			throw this.#createError("Expected closing parenthesis");
 		}
 
 		// consume closing parenthesis
@@ -502,7 +633,41 @@ export class ConditionParser {
 		return out;
 	}
 
-	/** Main api. Will parse the provided input. */
+	/**
+	 * Parses a human-friendly search condition string into a structured format.
+	 *
+	 * @param input - The search expression string to parse
+	 * @param options - Optional configuration for parsing behavior
+	 * @returns An object containing:
+	 *   - `parsed`: Array of parsed condition expressions in ConditionDump format
+	 *   - `unparsed`: Any trailing text that couldn't be parsed (useful for free-text search)
+	 *   - `meta`: Metadata about the parsed expressions (unique keys, operators, values)
+	 *
+	 * @example
+	 * Basic parsing:
+	 * ```ts
+	 * const { parsed, unparsed } = ConditionParser.parse("foo:bar and baz:bat");
+	 * ```
+	 *
+	 * @example
+	 * With options:
+	 * ```ts
+	 * const result = ConditionParser.parse("FOO:bar", {
+	 *   defaultOperator: "contains",
+	 *   transform: (ctx) => ({ ...ctx, key: ctx.key.toLowerCase() })
+	 * });
+	 * ```
+	 *
+	 * @example
+	 * Handling unparsed content:
+	 * ```ts
+	 * const { parsed, unparsed } = ConditionParser.parse(
+	 *   "category:books free text search"
+	 * );
+	 * // parsed: [{ expression: { key: "category", operator: "eq", value: "books" }, ... }]
+	 * // unparsed: "free text search"
+	 * ```
+	 */
 	static parse(
 		input: string,
 		options: Partial<ConditionParserOptions> = {}

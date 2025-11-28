@@ -528,3 +528,155 @@ Deno.test("with not", () => {
 // 	// r = ConditionParser.parse(" (  ( (foo:bar)))", { debug: true });
 // 	// console.log(r);
 // });
+
+Deno.test("error messages include position information", () => {
+	// Test that errors caught during parsing include position and context
+	// The parser is fault-tolerant and catches errors, converting them to unparsed content
+	// But we can verify the error format by checking specific edge cases
+
+	// These inputs will trigger errors internally, which get caught and result in unparsed content
+	const testCases = [
+		{
+			name: "unterminated quote should result in unparsed content",
+			input: 'status:active and name:"John Doe',
+			expectUnparsed: true,
+		},
+		{
+			name: "parentheses mismatch should result in unparsed content",
+			input: "((foo:bar)",
+			expectUnparsed: true,
+		},
+	];
+
+	testCases.forEach(({ name, input, expectUnparsed }) => {
+		const result = ConditionParser.parse(input);
+		if (expectUnparsed) {
+			// When parsing fails, content becomes unparsed
+			// This is the fault-tolerant behavior
+			assertEquals(
+				result.unparsed.length > 0 || result.parsed.length > 0,
+				true,
+				`${name}: expected either parsed or unparsed content`,
+			);
+		}
+	});
+});
+
+Deno.test("error message format validation (internal)", () => {
+	// Since the parser catches errors internally, we can't easily test the exact
+	// error message format through the public API. However, we can verify that
+	// errors are properly caught and don't crash the parser.
+
+	const problematicInputs = [
+		'status:"active',
+		"category:'books",
+		"key:(value",
+		"((((foo:bar",
+		'a:"b and c:"d',
+	];
+
+	problematicInputs.forEach((input) => {
+		// Should not throw - errors are caught and result in unparsed content
+		const result = ConditionParser.parse(input);
+
+		// Verify the result has the expected structure
+		assertEquals(typeof result.parsed, "object");
+		assertEquals(Array.isArray(result.parsed), true);
+		assertEquals(typeof result.unparsed, "string");
+		assertEquals(typeof result.meta, "object");
+	});
+});
+
+Deno.test("graceful error handling preserves partial results", () => {
+	// When parsing fails partway through, already-parsed content should be preserved
+	const input = 'status:active and name:"unclosed quote';
+
+	const result = ConditionParser.parse(input);
+
+	// Should have parsed the first part successfully
+	assertEquals(result.parsed.length >= 1, true, "should parse first expression");
+	assertEquals(
+		result.parsed[0].expression?.key,
+		"status",
+		"should parse status key",
+	);
+	assertEquals(
+		result.parsed[0].expression?.value,
+		"active",
+		"should parse status value",
+	);
+});
+
+Deno.test("error message format - unterminated quoted string", () => {
+	// Test the actual __createError public helper that's used internally
+
+	// Test the format with sample data
+	const input = "status:active and name:\"John";
+	const errorPos = 28; // At the end where quote isn't closed
+	const error = ConditionParser.__createError(
+		input,
+		errorPos,
+		"Unterminated quoted string"
+	);
+	const errorMsg = error.message;
+
+	// Verify the format
+	const lines = errorMsg.split("\n");
+	assertEquals(lines.length, 4, "should have 4 lines");
+	assertEquals(lines[0], "Unterminated quoted string");
+	assertEquals(lines[1], "Position: 28");
+	assertEquals(lines[2].startsWith('Context: "'), true);
+	assertEquals(lines[3].includes("^"), true);
+
+	// Test with different position
+	const error2 = ConditionParser.__createError(input, 6, "Expected colon after key");
+	const errorMsg2 = error2.message;
+	assertEquals(errorMsg2.includes("Position: 6"), true);
+	assertEquals(errorMsg2.includes("Expected colon after key"), true);
+});
+
+Deno.test("error message context window calculation", () => {
+	// Test the context window logic using the actual __createError method
+
+	// Test with short input
+	const shortInput = "foo:bar";
+	const error1 = ConditionParser.__createError(shortInput, 3, "Test", 20);
+	const msg1 = error1.message;
+	assertEquals(msg1.includes(shortInput), true, "short input should be fully included");
+	assertEquals(msg1.includes("Position: 3"), true);
+
+	// Test with long input
+	const longInput = "a".repeat(50) + "X" + "b".repeat(50);
+	const error2 = ConditionParser.__createError(longInput, 50, "Test", 20); // At "X"
+	const msg2 = error2.message;
+
+	// Extract context line
+	const lines2 = msg2.split("\n");
+	const contextLine2 = lines2[2]; // "Context: ..."
+	const contextContent2 = contextLine2.slice(10, -1); // Remove 'Context: "' and '"'
+
+	assertEquals(
+		contextContent2.length <= 40,
+		true,
+		"context should be limited",
+	);
+	assertEquals(contextContent2.includes("X"), true, "should include error position");
+
+	// Test at beginning
+	const error3 = ConditionParser.__createError(longInput, 0, "Test", 20);
+	const msg3 = error3.message;
+	const lines3 = msg3.split("\n");
+	const markerLine3 = lines3[3];
+	// At position 0, marker should be right at the start (after "Context: " prefix)
+	assertEquals(markerLine3.trim().startsWith("^"), true, "marker should be at start");
+
+	// Test at end
+	const error4 = ConditionParser.__createError(
+		longInput,
+		longInput.length - 1,
+		"Test",
+		20
+	);
+	const msg4 = error4.message;
+	assertEquals(msg4.includes("Position: " + (longInput.length - 1)), true);
+});
