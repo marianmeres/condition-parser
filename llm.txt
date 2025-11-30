@@ -1,0 +1,203 @@
+# @marianmeres/condition-parser - LLM Context File
+
+## Package Overview
+
+- **Name**: @marianmeres/condition-parser
+- **Version**: 1.7.0
+- **Type**: Deno-first TypeScript library with npm distribution
+- **Purpose**: Human-friendly search conditions notation parser (similar to Gmail search input syntax)
+- **Author**: Marian Meres
+- **License**: MIT
+- **Repository**: https://github.com/marianmeres/condition-parser
+
+## Architecture
+
+### File Structure
+```
+src/
+  mod.ts          - Entry point, re-exports parser.ts
+  parser.ts       - Core ConditionParser class (705 lines)
+tests/
+  all.test.ts     - Comprehensive test suite (683 lines)
+scripts/
+  build-npm.ts    - NPM package build script
+deno.json         - Deno configuration and package metadata
+```
+
+### Core Design
+- Single-class design: `ConditionParser` with static `parse()` method
+- Recursive descent parser with layered parsing functions
+- Fault-tolerant: catches errors and returns unparsed content instead of throwing
+- Output format compatible with @marianmeres/condition-builder
+
+## Main Export: ConditionParser
+
+### Static Properties
+- `DEFAULT_OPERATOR: string = "eq"` - Default operator when none specified
+- `DEBUG: boolean = false` - Global debug logging flag
+
+### Static Methods
+
+#### `parse(input: string, options?: Partial<ConditionParserOptions>): ParseResult`
+Main parsing method. Returns:
+```typescript
+{
+  parsed: ConditionDump,   // Array of parsed condition expressions
+  unparsed: string,        // Trailing unparsable text (free-text search)
+  meta: {
+    keys: string[],        // Unique keys found
+    operators: string[],   // Unique operators found
+    values: any[],         // Unique values found
+    expressions: ExpressionData[]  // All unique expressions
+  }
+}
+```
+
+#### `__createError(input, pos, message, contextRadius?): Error`
+Public helper for creating formatted error messages with position context.
+
+### Options Interface
+```typescript
+interface ConditionParserOptions {
+  defaultOperator: string;     // Default: "eq"
+  debug: boolean;              // Default: false
+  transform: (ctx: ExpressionContext) => ExpressionContext;
+  preAddHook: (ctx: ExpressionContext) => null | undefined | ExpressionContext;
+}
+```
+
+## Expression Syntax
+
+### Basic Format
+```
+key:value                    → { key, operator: "eq", value }
+key:operator:value           → { key, operator, value }
+```
+
+### Logical Operators
+- `and` (default, can be omitted)
+- `or`
+- `and not` (parsed as "andNot")
+- `or not` (parsed as "orNot")
+
+### Quoting & Escaping
+- Single quotes: `'value with spaces'`
+- Double quotes: `"value with spaces"`
+- Escaped quotes: `\'` or `\"`
+- Escaped colons: `\:`
+- Parenthesized values: `key:(complex value)`
+
+### Grouping
+- Parentheses for logical grouping: `(a:b or c:d) and e:f`
+- Nested grouping supported
+
+### Examples
+```
+foo:bar                              → Simple key:value
+foo:gt:100                           → With operator
+"my key":"my value"                  → Quoted identifiers
+foo:bar baz:bat                      → Implicit AND
+foo:bar or baz:bat                   → Explicit OR
+(a:b or c:d) and e:f                 → Grouped conditions
+a:b and not c:d                      → Negation
+status:active free text search       → Mixed (parsed + unparsed)
+```
+
+## Dependencies
+
+### Runtime
+- `@marianmeres/condition-builder` (jsr:@marianmeres/condition-builder@^1.9.0)
+  - Types: ConditionDump, ConditionJoinOperator, ExpressionContext
+  - Used for output format compatibility and Condition.restore()
+
+### Development
+- `@std/assert` - Deno standard assertions
+- `@std/fs` - Deno standard filesystem (build script)
+- `@std/path` - Deno standard path utilities (build script)
+
+## Integration with condition-builder
+
+The parser output (`parsed`) is designed to be directly usable with `Condition.restore()`:
+```typescript
+const { parsed, unparsed } = ConditionParser.parse(userInput);
+const condition = Condition.restore(parsed, options);
+condition.and("text", "match", unparsed);  // Handle free text
+```
+
+## Internal Parser Architecture
+
+### Parsing Layers (recursive descent)
+1. `#parseCondition()` - Top level, handles logical operators (and/or/and not/or not)
+2. `#parseTerm()` - Decision point between basic and parenthesized
+3. `#parseParenthesizedExpression()` - Handles `(...)` grouping, recurses to #parseCondition
+4. `#parseBasicExpression()` - Parses `key:operator:value` triplets
+
+### Helper Methods
+- `#parseQuotedString()` - Single/double quoted strings with escape support
+- `#parseUnquotedString()` - Unquoted identifiers (stops at `:`, `(`, `)`, whitespace)
+- `#parseParenthesizedValue()` - Values in `(...)` syntax
+- `#parseConditionOperator()` - Recognizes and/or/and not/or not
+- `#peek()`, `#consume()`, `#consumeWhitespace()` - Character-level operations
+
+### Error Handling
+- Fault-tolerant: errors are caught internally
+- Failed parsing results in content being moved to `unparsed`
+- Partial results preserved when parsing fails midway
+- Parentheses level mismatch detection
+
+## Build System
+
+### Deno Tasks
+- `deno task test` - Run tests with watch mode
+- `deno task test:no-watch` - Run tests once
+- `deno task npm:build` - Build npm package
+- `deno task npm:publish` - Build and publish to npm
+
+### NPM Build Process
+1. Copy src/ to .npm-dist/src/
+2. Replace .ts imports with .js
+3. Generate tsconfig.json and package.json
+4. Install npm dependencies
+5. Run TypeScript compiler
+6. Cleanup temporary files
+
+### Output NPM Package Structure
+```
+.npm-dist/
+  dist/           - Compiled JavaScript + declarations
+  package.json
+  LICENSE
+  README.md
+```
+
+## Test Coverage
+
+Tests cover:
+- Basic expressions (key:value, key:op:value)
+- Quoted strings (single, double, mixed)
+- Escaped characters (quotes, colons)
+- Logical operators (and, or, and not, or not)
+- Parenthesized grouping (simple, nested, multiple levels)
+- Unparsed content handling
+- Meta extraction (keys, operators, values, expressions uniqueness)
+- Transform hook
+- PreAddHook (filtering/routing expressions)
+- Integration with condition-builder
+- Round-trip (parse → restore → parse)
+- Empty input handling
+- Error message formatting
+- Graceful error handling with partial results
+- Parenthesized values: `key:(value)`
+
+## Code Style
+
+- Tabs for indentation
+- Line width: 90 characters
+- Private fields use `#` prefix
+- ESLint: `no-explicit-any` excluded
+- Comprehensive JSDoc comments on public API
+
+## Version History Notes
+
+- v1.7.0: Current version
+- Notable features: `and not` / `or not` operators, parenthesized values, meta extraction

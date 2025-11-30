@@ -134,3 +134,10 @@ assertEquals(
 ## Related
 
 [@marianmeres/condition-builder](https://github.com/marianmeres/condition-builder)
+
+## Package Identity
+
+- **Name:** @marianmeres/condition-parser
+- **Author:** Marian Meres
+- **Repository:** https://github.com/marianmeres/condition-parser
+- **License:** MIT
