@@ -1,5 +1,8 @@
 # @marianmeres/condition-parser
 
+[![NPM version](https://img.shields.io/npm/v/@marianmeres/condition-parser.svg)](https://www.npmjs.com/package/@marianmeres/condition-parser)
+[![JSR version](https://jsr.io/badges/@marianmeres/condition-parser)](https://jsr.io/@marianmeres/condition-parser)
+
 Human friendly search conditions notation parser. Somewhat similar to Gmail "Search email" input.
 
 The parsed output is designed to match [condition-builder](https://github.com/marianmeres/condition-builder) 
