@@ -2,6 +2,7 @@
 
 [![NPM version](https://img.shields.io/npm/v/@marianmeres/condition-parser.svg)](https://www.npmjs.com/package/@marianmeres/condition-parser)
 [![JSR version](https://jsr.io/badges/@marianmeres/condition-parser)](https://jsr.io/@marianmeres/condition-parser)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Human friendly search conditions notation parser. Somewhat similar to Gmail "Search email" input.
 
@@ -90,20 +91,14 @@ const result = ConditionParser.parse(
     unparsed: "this is free text"
 }
 
-// supported ConditionParser.parse options:
-export interface ConditionParserOptions {
-    /** Operator is optional. If not present will default to this option, which is by default "eq" */
-    defaultOperator: string;
-    /** Will print debug info to console. Defaults to false */
-    debug: boolean;
-    /** If provided, will use the output of this fn as a final parsed expression output. */
-    transform: (context: Context) => Context;
-    /** Applied as the last step before adding the currently parsed expression. 
-     * If returns falsey, will skip adding the currently parsed expression. */
-    preAddHook: (context: Context) => null | undefined | Context;
-}
-
+// ConditionParser.parse options (all optional):
+// - defaultOperator: string (default "eq") - operator when not specified
+// - debug: boolean (default false) - enable debug logging
+// - transform: (ctx) => ctx - transform each parsed expression
+// - preAddHook: (ctx) => ctx|null - filter/route expressions before adding
 ```
+
+See [API.md](./API.md) for complete API documentation.
 
 ## In friends harmony with condition-builder
 

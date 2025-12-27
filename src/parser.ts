@@ -4,17 +4,52 @@ import type {
 	ExpressionContext,
 } from "@marianmeres/condition-builder";
 
-interface ExpressionData {
+/**
+ * Represents a parsed expression with key, operator, and value.
+ * This is used in the metadata returned by the parser.
+ */
+export interface ExpressionData {
+	/** The key/field name of the expression */
 	key: string;
+	/** The operator (e.g., "eq", "gt", "contains") */
 	operator: string;
+	/** The value to compare against */
 	value: string;
 }
 
-interface Meta {
+/**
+ * Metadata about the parsed expressions.
+ * Contains arrays of unique keys, operators, values, and full expressions.
+ */
+export interface Meta {
+	/** Array of unique keys found in the parsed expressions */
 	keys: string[];
+	/** Array of unique operators found in the parsed expressions */
 	operators: string[];
+	/** Array of unique values found in the parsed expressions */
 	values: any[];
+	/** Array of unique expressions as {key, operator, value} objects */
 	expressions: ExpressionData[];
+}
+
+/**
+ * Result returned by {@link ConditionParser.parse}.
+ */
+export interface ConditionParserResult {
+	/**
+	 * Array of parsed condition expressions in ConditionDump format.
+	 * Compatible with {@link https://github.com/marianmeres/condition-builder | @marianmeres/condition-builder}.
+	 */
+	parsed: ConditionDump;
+	/**
+	 * Any trailing text that couldn't be parsed.
+	 * Useful for free-text search terms.
+	 */
+	unparsed: string;
+	/**
+	 * Metadata about the parsed expressions (unique keys, operators, values).
+	 */
+	meta: Meta;
 }
 
 /**
@@ -109,13 +144,13 @@ export class ConditionParser {
 	 * Default operator used when none is specified in the expression.
 	 * @default "eq"
 	 */
-	static DEFAULT_OPERATOR = "eq";
+	static DEFAULT_OPERATOR: string = "eq";
 
 	/**
 	 * Global debug flag. When true, all parser instances will log debug information.
 	 * @default false
 	 */
-	static DEBUG = false;
+	static DEBUG: boolean = false;
 
 	#input: string;
 	#pos: number = 0;
@@ -671,7 +706,7 @@ export class ConditionParser {
 	static parse(
 		input: string,
 		options: Partial<ConditionParserOptions> = {}
-	): { parsed: ConditionDump; unparsed: string; meta: Meta } {
+	): ConditionParserResult {
 		const parser = new ConditionParser(input, options);
 
 		let parsed: ConditionDump = [];
