@@ -1,0 +1,1 @@
+Human-friendly search conditions parser (Gmail-style syntax) that converts expressions like "key:operator:value" with AND/OR/NOT joins and grouping into structured condition trees.
