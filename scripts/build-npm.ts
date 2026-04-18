@@ -6,5 +6,5 @@ await npmBuild({
 	name: denoJson.name,
 	version: denoJson.version,
 	repository: denoJson.name.replace(/^@/, ""),
-	dependencies: versionizeDeps(["@marianmeres/condition-builder"], "../deno.json"),
+	dependencies: versionizeDeps(["@marianmeres/condition-builder"], denoJson),
 });
