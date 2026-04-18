@@ -810,6 +810,83 @@ export class ConditionParser {
 	}
 
 	/**
+	 * Scans the input for the first position that could begin a valid condition
+	 * expression. Returns that position, or -1 if nothing expression-like exists.
+	 *
+	 * A candidate start is either:
+	 *   - an opening parenthesis `(` (start of a group), or
+	 *   - a word / quoted string followed by optional whitespace and `:`.
+	 *
+	 * Everything before the returned position is surfaced as leading free text
+	 * in `unparsed` (combined with any trailing free text).
+	 */
+	#findFirstExpressionStart(): number {
+		const input = this.#input;
+		const len = this.#length;
+		let i = 0;
+		let wordStart = -1;
+
+		while (i < len) {
+			const ch = input[i];
+
+			// Paren group is a valid top-level expression start.
+			if (ch === "(") return i;
+
+			// Whitespace breaks word tracking.
+			if (/\s/.test(ch)) {
+				wordStart = -1;
+				i++;
+				continue;
+			}
+
+			// Quoted string: treat the whole run as one "word". If the next
+			// non-whitespace after the closing quote is `:`, it's a key.
+			if (ch === '"' || ch === "'") {
+				const ws = wordStart < 0 ? i : wordStart;
+				const quote = ch;
+				i++;
+				while (i < len && input[i] !== quote) {
+					if (input[i] === "\\" && i + 1 < len) i += 2;
+					else i++;
+				}
+				if (i < len) i++; // closing quote
+				let j = i;
+				while (j < len && /\s/.test(input[j])) j++;
+				if (input[j] === ":") return ws;
+				wordStart = -1;
+				continue;
+			}
+
+			// Backslash escape: both chars belong to the current word.
+			if (ch === "\\" && i + 1 < len) {
+				if (wordStart < 0) wordStart = i;
+				i += 2;
+				continue;
+			}
+
+			// Stray `)` can't start an expression.
+			if (ch === ")") {
+				wordStart = -1;
+				i++;
+				continue;
+			}
+
+			// A `:` following a word marks a key boundary.
+			if (ch === ":") {
+				if (wordStart >= 0) return wordStart;
+				i++;
+				continue;
+			}
+
+			// Regular word character.
+			if (wordStart < 0) wordStart = i;
+			i++;
+		}
+
+		return -1;
+	}
+
+	/**
 	 * Parses a human-friendly search condition string into a structured format.
 	 *
 	 * @param input - The search expression string to parse
@@ -857,30 +934,48 @@ export class ConditionParser {
 
 		// Empty input is a no-op (avoid throwing "Expected colon after key" at pos 0).
 		if (parser.#length > 0) {
-			try {
-				parser.#parseCondition(internal, "and");
-			} catch (e) {
-				parser.#debug(`${e}`);
-				// collect trailing unparsed input
-				unparsed = parser.#input.slice(parser.#pos);
-				const message = e instanceof Error ? e.message : String(e);
-				// First line of `__createError`-formatted messages is the bare cause.
-				const firstLine = message.split("\n", 1)[0];
-				const start = Math.max(0, parser.#pos - 20);
-				const end = Math.min(parser.#input.length, parser.#pos + 20);
-				errors.push({
-					message: firstLine,
-					position: parser.#pos,
-					snippet: parser.#input.slice(start, end),
-				});
-			}
+			// Locate the first position that could start an expression; anything
+			// before it is "leading free text" which we surface as `unparsed`
+			// combined (space-joined) with any trailing free text.
+			const startPos = parser.#findFirstExpressionStart();
 
-			// Trailing content that wasn't grabbed by the throw path (e.g. an
-			// unmatched closing parenthesis at the top level breaks the parse
-			// loop without throwing). Surface it as `unparsed` to match the
-			// long-standing convention.
-			if (!unparsed && parser.#pos < parser.#length) {
-				unparsed = parser.#input.slice(parser.#pos);
+			if (startPos < 0) {
+				// No expression-like start anywhere — whole input is free text.
+				unparsed = parser.#input;
+			} else {
+				const leading = parser.#input.slice(0, startPos).trim();
+				parser.#pos = startPos;
+
+				try {
+					parser.#parseCondition(internal, "and");
+				} catch (e) {
+					parser.#debug(`${e}`);
+					// collect trailing unparsed input
+					unparsed = parser.#input.slice(parser.#pos);
+					const message = e instanceof Error ? e.message : String(e);
+					// First line of `__createError`-formatted messages is the bare cause.
+					const firstLine = message.split("\n", 1)[0];
+					const start = Math.max(0, parser.#pos - 20);
+					const end = Math.min(parser.#input.length, parser.#pos + 20);
+					errors.push({
+						message: firstLine,
+						position: parser.#pos,
+						snippet: parser.#input.slice(start, end),
+					});
+				}
+
+				// Trailing content that wasn't grabbed by the throw path (e.g. an
+				// unmatched closing parenthesis at the top level breaks the parse
+				// loop without throwing). Surface it as `unparsed` to match the
+				// long-standing convention.
+				if (!unparsed && parser.#pos < parser.#length) {
+					unparsed = parser.#input.slice(parser.#pos);
+				}
+
+				// Prepend any leading free text, single-space joined.
+				if (leading) {
+					unparsed = unparsed ? `${leading} ${unparsed}` : leading;
+				}
 			}
 		}
 

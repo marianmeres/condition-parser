@@ -211,7 +211,7 @@ interface ConditionParserResult {
 | Property | Type | Description |
 |----------|------|-------------|
 | `parsed` | `ConditionDump` | Array of parsed condition expressions (compatible with `@marianmeres/condition-builder`) |
-| `unparsed` | `string` | Any trailing text that couldn't be parsed (useful for free-text search) |
+| `unparsed` | `string` | Any free-text fragments that couldn't be parsed — both leading (before the first expression) and trailing (after the last parseable token), combined with a single space (useful for free-text search) |
 | `meta` | [`Meta`](#meta) | Metadata about the parsed expressions |
 | `errors` | [`ParseError[]`](#parseerror) | Diagnostic records for any syntactic issues encountered; empty on clean parse |
 
@@ -373,13 +373,29 @@ a:b and (c:d or (e:f and g:h))
 
 ### Free Text
 
-Any trailing unparsable content is preserved:
+Unparsable content surrounding a contiguous parseable middle is preserved.
+Both **leading** (before the first expression) and **trailing** (after the
+last parseable token) fragments are collected into `unparsed`, single-space
+joined:
 
 ```
 category:books the search query
 // parsed: category:books
 // unparsed: "the search query"
+
+the search query category:books
+// parsed: category:books
+// unparsed: "the search query"
+
+the search category:books query
+// parsed: category:books
+// unparsed: "the search query"
 ```
+
+> **Limitation**: only free text that wraps a *contiguous* parseable section
+> is reassembled. Free text appearing **between** two expressions (e.g.,
+> `a:b free c:d`) breaks the parse at the interstitial token, so `c:d`
+> ends up inside `unparsed` along with `"free"`.
 
 ---
 

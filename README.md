@@ -65,11 +65,13 @@ You can use escaped quotes (or colons) inside the identifiers:
 `"my key":'my \: operator':"my \" value with quotes" and (foo:<:bar or baz:>:bat)`
 ```
 
-Also, you can append arbitrary unparsable content which will be preserved:
+Also, you can mix in arbitrary unparsable content — around a contiguous
+parseable middle — which will be preserved. Both leading and trailing
+free-text fragments are collected into `unparsed` (single-space joined):
 
 ```ts
 const result = ConditionParser.parse(
-    "a:b and (c:d or e:f) this is free text", 
+    "this is a:b and (c:d or e:f) free text",
     options: Partial<ConditionParserOptions> // read below
 );
 

@@ -300,6 +300,87 @@ const DATA: {
 		expectedUnparsed: "only unparsable",
 	},
 	{
+		// leading free text only
+		input: "this is free text a:b c:d",
+		expected: [
+			{
+				expression: { key: "a", operator: "eq", value: "b" },
+				operator: "and",
+				condition: undefined,
+			},
+			{
+				expression: { key: "c", operator: "eq", value: "d" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: "this is free text",
+	},
+	{
+		// leading + trailing free text around a contiguous parseable middle
+		input: "this is a:b c:d free text",
+		expected: [
+			{
+				expression: { key: "a", operator: "eq", value: "b" },
+				operator: "and",
+				condition: undefined,
+			},
+			{
+				expression: { key: "c", operator: "eq", value: "d" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: "this is free text",
+	},
+	{
+		// leading free text before a parenthesized group
+		input: "prefix (a:b or c:d)",
+		expected: [
+			{
+				condition: [
+					{
+						expression: { key: "a", operator: "eq", value: "b" },
+						operator: "or",
+						condition: undefined,
+					},
+					{
+						expression: { key: "c", operator: "eq", value: "d" },
+						operator: "or",
+						condition: undefined,
+					},
+				],
+				operator: "and",
+				expression: undefined,
+			},
+		],
+		expectedUnparsed: "prefix",
+	},
+	{
+		// reserved word as leading free text (not a connective at pos 0)
+		input: "and stuff a:b",
+		expected: [
+			{
+				expression: { key: "a", operator: "eq", value: "b" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: "and stuff",
+	},
+	{
+		// quoted leading free text containing a colon must not be mistaken for a key
+		input: '"hey: ho" a:b',
+		expected: [
+			{
+				expression: { key: "a", operator: "eq", value: "b" },
+				operator: "and",
+				condition: undefined,
+			},
+		],
+		expectedUnparsed: '"hey: ho"',
+	},
+	{
 		input: "foo:(bar)",
 		expected: [
 			{

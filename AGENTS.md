@@ -16,7 +16,7 @@ src/
 └── parser.ts       # Main parser implementation
 
 tests/
-└── all.test.ts     # Test suite (46 tests)
+└── all.test.ts     # Test suite (51 tests)
 
 scripts/
 └── build-npm.ts    # NPM distribution builder
@@ -148,7 +148,7 @@ deno task release minor # Minor version release
 ## Key Implementation Details
 
 1. **Recursive Descent Parser**: Layered parsing methods handle grammar levels
-2. **Fault Tolerance**: Parse errors don't throw; unparsable content preserved in `unparsed`; diagnostics in `errors[]`
+2. **Fault Tolerance**: Parse errors don't throw; unparsable content preserved in `unparsed` (both leading and trailing free text around a contiguous parseable middle, single-space joined); diagnostics in `errors[]`
 3. **Escape Support**: Context-dependent backslash escapes (see table below)
 4. **Case Insensitive**: Operators `and`, `or`, `not` are case-insensitive
 5. **Metadata Collection**: Unique keys, operators, values tracked in `meta`
@@ -177,7 +177,7 @@ const condition = Condition.restore(parsed);
 
 ## Test Coverage
 
-46 tests covering:
+51 tests covering:
 - Basic expression parsing
 - Quoted identifiers (single/double quotes)
 - Escaped characters (including `\\` self-escape)
@@ -185,7 +185,7 @@ const condition = Condition.restore(parsed);
 - Parenthesized grouping (including double-wrapped `((...))`)
 - Nested parens inside values
 - `not` disambiguation (only a suffix right after and/or)
-- Free text handling
+- Free text handling (leading, trailing, and wrapped around parseable middle)
 - Transform function
 - Pre-add hook (drop semantics + operator transfer + empty-group collapse)
 - `errors[]` diagnostic channel
