@@ -52,8 +52,10 @@ export const tools: McpToolDefinition[] = [
 			});
 			return JSON.stringify(
 				{
-					valid: !result.unparsed.trim(),
+					// strict: fully consumed AND no diagnostic errors
+					valid: !result.unparsed.trim() && result.errors.length === 0,
 					unparsed: result.unparsed || null,
+					errors: result.errors,
 					expressionCount: result.meta.expressions.length,
 					keys: result.meta.keys,
 					operators: result.meta.operators,

@@ -88,17 +88,25 @@ const result = ConditionParser.parse(
             operator: "and"
         }
     ],
-    unparsed: "this is free text"
+    unparsed: "this is free text",
+    meta:   { /* unique keys/operators/values/expressions */ },
+    errors: []   // non-empty on syntactic problems; see API.md
 }
 
 // ConditionParser.parse options (all optional):
 // - defaultOperator: string (default "eq") - operator when not specified
 // - debug: boolean (default false) - enable debug logging
 // - transform: (ctx) => ctx - transform each parsed expression
-// - preAddHook: (ctx) => ctx|null - filter/route expressions before adding
+// - preAddHook: (ctx) => ctx|null|undefined - return falsy to DROP the expression
 ```
 
-See [API.md](./API.md) for complete API documentation.
+For strict validation (e.g. form input), check both:
+
+```ts
+const ok = errors.length === 0 && unparsed.trim() === "";
+```
+
+See [API.md](./API.md) for complete API documentation, including the [Breaking Changes](./API.md#breaking-changes) section for 1.8.0.
 
 ## In friends harmony with condition-builder
 

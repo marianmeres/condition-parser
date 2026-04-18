@@ -12,6 +12,8 @@ Complete API documentation for `@marianmeres/condition-parser`.
   - [ConditionParserResult](#conditionparserresult)
   - [Meta](#meta)
   - [ExpressionData](#expressiondata)
+  - [ParseError](#parseerror)
+- [Breaking Changes](#breaking-changes)
 
 ---
 
@@ -33,6 +35,8 @@ static DEFAULT_OPERATOR: string = "eq"
 
 Default operator used when none is specified in the expression (e.g., `key:value` uses `"eq"`).
 
+> **Note**: this static is writable for convenience but affects every subsequent `parse()` call in the process. Prefer the per-call `defaultOperator` option in long-lived processes (servers, CLIs).
+
 #### `DEBUG`
 
 ```ts
@@ -40,6 +44,8 @@ static DEBUG: boolean = false
 ```
 
 Global debug flag. When `true`, all parser instances log debug information to the console.
+
+> **Note**: same caveat as `DEFAULT_OPERATOR` — prefer the per-call `debug` option.
 
 ---
 
@@ -147,10 +153,10 @@ interface ConditionParserOptions {
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `defaultOperator` | `string` | `"eq"` | Default operator when not explicitly specified |
+| `defaultOperator` | `string` | `"eq"` | Default operator when not explicitly specified. Empty strings are ignored (fall back to the static default). |
 | `debug` | `boolean` | `false` | Enable debug logging to console |
 | `transform` | `function` | identity | Transform function applied to each parsed expression |
-| `preAddHook` | `function` | - | Hook called before adding each expression; return falsy to skip |
+| `preAddHook` | `function` | - | Hook called before adding each expression; return `null` / `undefined` to **drop** the expression (see notes below) |
 
 **Transform Example:**
 
@@ -174,10 +180,18 @@ const result = ConditionParser.parse("foo:bar baz:bat", {
   preAddHook: (ctx) => {
     if (ctx.key === "foo") return ctx; // include in parsed
     otherConditions.push(ctx); // route elsewhere
-    return null; // skip in parsed
+    return null; // drop from parsed
   }
 });
 ```
+
+**Drop semantics**:
+
+- The expression is omitted from `parsed` and from `meta`.
+- The "join to next sibling" operator attached to the dropped expression is **transferred to its predecessor** so the remaining chain reflects the original logical intent. For `a:1 and b:2 or c:3`, dropping `b:2` yields `a:1 or c:3` (the `or` that would have connected `b → c` is promoted).
+- If a parenthesized group ends up empty (every inner expression dropped), the group wrapper is removed from its parent automatically.
+
+> **Breaking change (1.8.0)**: previously, returning falsy from `preAddHook` silently substituted a `{key: "1", operator: <defaultOperator>, value: "1"}` placeholder (`1=1`) rather than dropping. If you relied on the placeholder, return it yourself from the hook.
 
 ---
 
@@ -190,6 +204,7 @@ interface ConditionParserResult {
   parsed: ConditionDump;
   unparsed: string;
   meta: Meta;
+  errors: ParseError[];
 }
 ```
 
@@ -198,6 +213,9 @@ interface ConditionParserResult {
 | `parsed` | `ConditionDump` | Array of parsed condition expressions (compatible with `@marianmeres/condition-builder`) |
 | `unparsed` | `string` | Any trailing text that couldn't be parsed (useful for free-text search) |
 | `meta` | [`Meta`](#meta) | Metadata about the parsed expressions |
+| `errors` | [`ParseError[]`](#parseerror) | Diagnostic records for any syntactic issues encountered; empty on clean parse |
+
+> For **strict validation** (distinguish "syntax error" from "trailing free text"), check both `errors.length === 0` **and** `unparsed === ""`.
 
 ---
 
@@ -209,7 +227,7 @@ Metadata about the parsed expressions.
 interface Meta {
   keys: string[];
   operators: string[];
-  values: any[];
+  values: string[];
   expressions: ExpressionData[];
 }
 ```
@@ -218,8 +236,10 @@ interface Meta {
 |----------|------|-------------|
 | `keys` | `string[]` | Array of unique keys found in parsed expressions |
 | `operators` | `string[]` | Array of unique operators found in parsed expressions |
-| `values` | `any[]` | Array of unique values found in parsed expressions |
+| `values` | `string[]` | Array of unique values found in parsed expressions (string-equality deduplicated) |
 | `expressions` | [`ExpressionData[]`](#expressiondata) | Array of unique expressions as objects |
+
+> **Type narrowing (1.8.0)**: `values` is now typed `string[]` (was `any[]`). Runtime behavior is unchanged — parser output has always been strings — but strict `any[]` consumers may need to update their type annotations.
 
 **Example:**
 
@@ -258,6 +278,28 @@ interface ExpressionData {
 
 ---
 
+### ParseError
+
+Diagnostic record describing where/why parsing stopped short.
+
+```ts
+interface ParseError {
+  message: string;
+  position: number;
+  snippet: string;
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `string` | Human-readable error message (e.g. `"Unterminated quoted string"`) |
+| `position` | `number` | Zero-based index in the original input where the error was detected |
+| `snippet` | `string` | Short slice of the input surrounding `position` (context window) |
+
+A non-empty `errors` array **does not** imply `parsed` is empty — any successfully parsed prefix is preserved and the failing token(s) are rolled into `unparsed`.
+
+---
+
 ## Expression Syntax
 
 ### Basic Expressions
@@ -279,12 +321,22 @@ Use single or double quotes for identifiers containing spaces or special charact
 
 ### Escaped Characters
 
-Escape special characters with backslash:
+Backslash-escape special characters. Stray backslashes (not followed by an escapable char) are kept literally.
+
+| Context | Escapable chars |
+|---------|-----------------|
+| Quoted strings (`"..."` / `'...'`) | `\\`, matching quote (`\"` or `\'`) |
+| Parenthesized values (`(...)`) | `\\`, `\(`, `\)` |
+| Unquoted tokens | `\\`, `\:`, `\(`, `\)`, `\ ` (space), `\⇥` (tab) |
+
+Examples:
 
 ```
 "value with \" quote"    -> value with " quote
 'value with \' quote'    -> value with ' quote
-key\:colon:value         -> key: "key:colon"
+"path\\to\\file"         -> path\to\file
+key\:colon:value         -> { key: "key:colon", value: "value" }
+key:(value with \) paren) -> value: "value with ) paren"
 ```
 
 ### Parenthesized Values
@@ -294,8 +346,11 @@ Wrap values in parentheses (useful for complex values):
 ```
 key:(value with spaces)
 key:eq:(complex value)
+key:eq:(a(b)c)           -> value: "a(b)c"   (balanced nested parens)
 key:eq:(value with \) paren)
 ```
+
+> **Nested parens (1.8.0)**: parenthesized values now preserve balanced nested `()` as literal content. Previously the first unescaped `)` terminated the value.
 
 ### Logical Operators
 
@@ -353,3 +408,19 @@ c.and("user_id", "eq", 123).and(
 console.log(c.toString());
 // "user_id"='123' and (("folder"='my projects' or "folder"='inbox') and "text"~*'foo bar')
 ```
+
+---
+
+## Breaking Changes
+
+### 1.8.0
+
+1. **`preAddHook` falsy return now drops the expression** (previously replaced with a `{key: "1", operator: defaultOperator, value: "1"}` placeholder). The dropped expression's "join to next" operator is transferred to its predecessor, and empty parenthesized groups collapse. See [PreAddHook Example](#preaddhook-example). *Migration*: if you relied on the `1=1` placeholder, return it explicitly from your hook.
+2. **`ConditionParserResult.errors: ParseError[]`** is a new required field on the result. *Migration*: consumers using the destructured shape `{ parsed, unparsed, meta }` are unaffected; code constructing `ConditionParserResult` literals needs to add `errors: []`.
+3. **`Meta.values` is now typed `string[]`** (was `any[]`). Runtime behavior unchanged. *Migration*: update strict type annotations if needed.
+4. **Parser no longer throws a bogus "Parentheses level mismatch"** for balanced inputs starting with one or more `(`. Previously the throw was silently swallowed — the visible effect is that `errors` no longer holds a phantom entry for inputs like `((foo:bar))`.
+5. **Stray `not` in trailing terms is no longer consumed.** `a:b and c:d not e:f` now preserves `c:d` (previously dropped) and routes `not e:f` to `unparsed`. The `not` keyword is still recognized when it sits immediately after an `and` / `or` join.
+6. **Backslash escapes apply to backslash itself.** `"foo\\bar"` now yields `foo\bar`; previously the input was unterminated. Also applies to parenthesized values.
+7. **Parenthesized values support balanced nested parens.** `key:(a(b)c)` now yields `a(b)c`; previously the first `)` terminated the value.
+8. **Unquoted tokens can escape more characters**: `\\`, `\:`, `\(`, `\)`, `\ ` (space), `\⇥` (tab). Previously only `\:` was recognized.
+9. **Empty `defaultOperator` option silently falls back** to `ConditionParser.DEFAULT_OPERATOR` (`"eq"` by default). Previously could produce malformed expressions.

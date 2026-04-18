@@ -432,7 +432,9 @@ Deno.test("transform", () => {
 	assertEquals(parsed[0].expression?.value, "BAR");
 });
 
-Deno.test("pre add hook", () => {
+Deno.test("pre add hook (drop semantics)", () => {
+	// BC NOTE (>= 1.8.0): a falsy return from preAddHook now truly DROPS the
+	// expression. Previously it silently substituted a `1=1` placeholder.
 	const other = new Condition();
 	const options = {
 		preAddHook: (ctx: any) => {
@@ -445,22 +447,16 @@ Deno.test("pre add hook", () => {
 	};
 
 	let r = ConditionParser.parse("foo:bar baz:bat", options);
-	// clog(r);
 
-	// bar is skipped, and moved to second
+	// baz:bat is dropped from `parsed` and rerouted into `other` instead.
 	assertEquals(r.parsed, [
 		{
 			expression: { key: "foo", operator: "eq", value: "bar" },
 			operator: "and",
 			condition: undefined,
 		},
-		{
-			expression: { key: "1", operator: "eq", value: "1" },
-			operator: "and",
-			condition: undefined,
-		},
 	]);
-	assertEquals(Condition.restore(r.parsed).toString(), "foo=bar and 1=1");
+	assertEquals(Condition.restore(r.parsed).toString(), "foo=bar");
 
 	assertEquals(other.toJSON(), [
 		{
@@ -469,12 +465,39 @@ Deno.test("pre add hook", () => {
 		},
 	]);
 
-	//
+	// Group with the only kept member: outer wrapper survives because the inner
+	// group still has at least one expression.
 	r = ConditionParser.parse("bar:bat and (ha:ho or foo:boo)", options);
 	assertEquals(
 		Condition.restore(r.parsed).toString(),
-		"1=1 and (1=1 or foo=boo)"
+		"(foo=boo)"
 	);
+});
+
+Deno.test("pre add hook (operator transfer)", () => {
+	// Skipping a middle term must transfer its "join to next" operator to the
+	// previous sibling so the rendered chain reflects the original intent.
+	const r = ConditionParser.parse("a:1 and b:2 or c:3", {
+		preAddHook: (ctx) => (ctx.key === "b" ? null : ctx),
+	});
+	// Original intent: (a AND b) OR c. Drop b => a OR c (preserve b's "or" link).
+	assertEquals(Condition.restore(r.parsed).toString(), "a=1 or c=3");
+});
+
+Deno.test("pre add hook (drop first)", () => {
+	const r = ConditionParser.parse("a:1 or b:2", {
+		preAddHook: (ctx) => (ctx.key === "a" ? null : ctx),
+	});
+	assertEquals(Condition.restore(r.parsed).toString(), "b=2");
+});
+
+Deno.test("pre add hook (empty group is removed)", () => {
+	const r = ConditionParser.parse("a:1 and (b:2 or c:3)", {
+		preAddHook: (ctx) =>
+			ctx.key === "b" || ctx.key === "c" ? null : ctx,
+	});
+	// The whole inner group becomes empty → dropped along with its wrapper.
+	assertEquals(Condition.restore(r.parsed).toString(), "a=1");
 });
 
 Deno.test("restore input", () => {
@@ -504,6 +527,7 @@ Deno.test("parse empty", () => {
 		parsed: [],
 		unparsed: "",
 		meta: { keys: [], operators: [], values: [], expressions: [] },
+		errors: [],
 	});
 });
 
@@ -679,4 +703,121 @@ Deno.test("error message context window calculation", () => {
 	);
 	const msg4 = error4.message;
 	assertEquals(msg4.includes("Position: " + (longInput.length - 1)), true);
+});
+
+// ---------------------------------------------------------------------------
+// Regression tests for bugs fixed in 1.8.0
+// ---------------------------------------------------------------------------
+
+Deno.test("regression: `not` as key/substring after join is not mis-consumed", () => {
+	// Used to silently drop `c:d` because /\s*not\s+/ matched `not` inside a
+	// later token. After the fix, "not" is only the NOT suffix when it sits
+	// immediately after the and/or keyword.
+	const r = ConditionParser.parse("a:b and c:d not:foo");
+	// "not:foo" parses as { key: "not", operator: "eq", value: "foo" } (default
+	// join "and" is implicit between c:d and not:foo).
+	assertEquals(r.parsed.length, 3);
+	assertEquals(r.parsed[0].expression, {
+		key: "a",
+		operator: "eq",
+		value: "b",
+	});
+	assertEquals(r.parsed[1].expression, {
+		key: "c",
+		operator: "eq",
+		value: "d",
+	});
+	assertEquals(r.parsed[2].expression, {
+		key: "not",
+		operator: "eq",
+		value: "foo",
+	});
+});
+
+Deno.test("regression: `not` keyword still works immediately after join", () => {
+	const r = ConditionParser.parse("a:1 and not b:2 or not c:3");
+	assertEquals(
+		Condition.restore(r.parsed).toString(),
+		"a=1 and not b=2 or not c=3"
+	);
+});
+
+Deno.test("regression: stray `not` after a term doesn't eat the preceding expression", () => {
+	// The original B2 case from the analysis: `a:b and c:d not e:f`.
+	// Before the fix, `c:d` was silently dropped because the unanchored
+	// `not` regex would jump the cursor past it. After the fix, `c:d`
+	// survives and "not e:f" becomes unparsed (malformed key).
+	const r = ConditionParser.parse("a:b and c:d not e:f");
+	assertEquals(r.parsed.length, 2);
+	assertEquals(r.parsed[0].expression?.key, "a");
+	assertEquals(r.parsed[1].expression?.key, "c");
+	assertEquals(r.unparsed, "not e:f");
+});
+
+Deno.test("regression: backslash escapes itself inside a quoted string", () => {
+	// Input `"foo\\bar"` should yield value `foo\bar` (one backslash).
+	const r = ConditionParser.parse('k:"foo\\\\bar"');
+	assertEquals(r.parsed[0].expression?.value, "foo\\bar");
+});
+
+Deno.test("regression: backslash escapes itself inside a parenthesized value", () => {
+	const r = ConditionParser.parse("k:(foo\\\\bar)");
+	assertEquals(r.parsed[0].expression?.value, "foo\\bar");
+});
+
+Deno.test("regression: parenthesized value supports balanced nested parens", () => {
+	const r = ConditionParser.parse("k:(a(b)c)");
+	assertEquals(r.parsed[0].expression?.value, "a(b)c");
+	assertEquals(r.unparsed, "");
+});
+
+Deno.test("regression: parenthesized value still honors explicit \\) escape", () => {
+	const r = ConditionParser.parse("k:(a\\)b)");
+	assertEquals(r.parsed[0].expression?.value, "a)b");
+});
+
+Deno.test("regression: multiple leading parens parse cleanly (no ghost mismatch)", () => {
+	// Before the fix, the top-level "opening parens level" check would throw
+	// (silently, then get swallowed) for any balanced double-wrapped input.
+	const r = ConditionParser.parse("((foo:bar))");
+	assertEquals(r.errors, []);
+	assertEquals(r.unparsed, "");
+	// Nested structure: group( group( foo:bar ) )
+	assertEquals(r.parsed.length, 1);
+	assertEquals(
+		Condition.restore(r.parsed).toString(),
+		"((foo=bar))"
+	);
+});
+
+Deno.test("errors channel: unterminated quote surfaces a diagnostic", () => {
+	const r = ConditionParser.parse('status:active and name:"John');
+	assertEquals(r.errors.length, 1);
+	assertEquals(r.errors[0].message, "Unterminated quoted string");
+	assertEquals(typeof r.errors[0].position, "number");
+	assertEquals(r.unparsed.length > 0, true);
+});
+
+Deno.test("errors channel: clean parse reports no errors", () => {
+	const r = ConditionParser.parse("a:1 and b:2");
+	assertEquals(r.errors, []);
+});
+
+Deno.test("errors channel: stray trailing ')' is captured as unparsed, not error", () => {
+	// We preserve the historical behavior: unmatched closing paren at top
+	// level is emitted as trailing free text (not a hard error).
+	const r = ConditionParser.parse("foo:eq:(bar))");
+	assertEquals(r.unparsed, ")");
+	assertEquals(r.errors, []);
+});
+
+Deno.test("meta.values is narrowed to string[]", () => {
+	// Dedup is driven by string equality — previously declared as any[].
+	const r = ConditionParser.parse("a:1 and b:1 and c:2");
+	assertEquals(r.meta.values, ["1", "2"]);
+});
+
+Deno.test("empty defaultOperator falls back to ConditionParser.DEFAULT_OPERATOR", () => {
+	const r = ConditionParser.parse("foo:bar", { defaultOperator: "" });
+	assertEquals(r.parsed[0].expression?.operator, "eq");
 });

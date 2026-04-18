@@ -3,7 +3,7 @@
 ## Package Overview
 
 - **Name**: `@marianmeres/condition-parser`
-- **Version**: 1.7.1
+- **Version**: 1.8.0 (pending release; see deno.json for current)
 - **Purpose**: Human-friendly search conditions notation parser (Gmail-style search syntax)
 - **License**: MIT
 - **Runtime**: Deno (primary), Node.js (via NPM distribution)
@@ -13,13 +13,15 @@
 ```
 src/
 ├── mod.ts          # Public entry point (re-exports parser.ts)
-└── parser.ts       # Main parser implementation (705 lines)
+└── parser.ts       # Main parser implementation
 
 tests/
-└── all.test.ts     # Test suite (682 lines, 30 tests)
+└── all.test.ts     # Test suite (46 tests)
 
 scripts/
 └── build-npm.ts    # NPM distribution builder
+
+mcp.ts              # MCP tool definitions (parse-condition, validate-condition-syntax)
 ```
 
 ## Public API
@@ -65,12 +67,13 @@ interface ConditionParserResult {
   parsed: ConditionDump;        // from @marianmeres/condition-builder
   unparsed: string;
   meta: Meta;
+  errors: ParseError[];         // empty when input parsed cleanly
 }
 
 interface Meta {
   keys: string[];
   operators: string[];
-  values: any[];
+  values: string[];
   expressions: ExpressionData[];
 }
 
@@ -78,6 +81,12 @@ interface ExpressionData {
   key: string;
   operator: string;
   value: string;
+}
+
+interface ParseError {
+  message: string;
+  position: number;
+  snippet: string;
 }
 ```
 
@@ -139,12 +148,22 @@ deno task release minor # Minor version release
 ## Key Implementation Details
 
 1. **Recursive Descent Parser**: Layered parsing methods handle grammar levels
-2. **Fault Tolerance**: Parse errors don't throw; unparsable content preserved in `unparsed`
-3. **Escape Support**: Backslash escapes for `'`, `"`, `:`, `)` within strings
+2. **Fault Tolerance**: Parse errors don't throw; unparsable content preserved in `unparsed`; diagnostics in `errors[]`
+3. **Escape Support**: Context-dependent backslash escapes (see table below)
 4. **Case Insensitive**: Operators `and`, `or`, `not` are case-insensitive
 5. **Metadata Collection**: Unique keys, operators, values tracked in `meta`
 6. **Transform Pipeline**: Optional expression transformation before output
-7. **Pre-add Hook**: Optional filtering/routing of expressions
+7. **Pre-add Hook**: Optional filtering/routing of expressions; falsy return **drops** the expression
+
+### Escape Table
+
+| Context | Escapable characters |
+|---------|----------------------|
+| Quoted string (`"..."` / `'...'`) | `\\`, matching quote (`\"` or `\'`) |
+| Parenthesized value (`(...)`) | `\\`, `\(`, `\)` (also supports balanced nested parens literally) |
+| Unquoted token | `\\`, `\:`, `\(`, `\)`, `\ ` (space), `\⇥` (tab) |
+
+Stray backslashes (not followed by an escapable char) are preserved literally.
 
 ## Integration Pattern
 
@@ -158,17 +177,18 @@ const condition = Condition.restore(parsed);
 
 ## Test Coverage
 
-30 tests covering:
+46 tests covering:
 - Basic expression parsing
 - Quoted identifiers (single/double quotes)
-- Escaped characters
+- Escaped characters (including `\\` self-escape)
 - Logical operators (and, or, and not, or not)
-- Parenthesized grouping
-- Nested conditions
+- Parenthesized grouping (including double-wrapped `((...))`)
+- Nested parens inside values
+- `not` disambiguation (only a suffix right after and/or)
 - Free text handling
 - Transform function
-- Pre-add hook
-- Error handling
+- Pre-add hook (drop semantics + operator transfer + empty-group collapse)
+- `errors[]` diagnostic channel
 - Metadata collection
 
 ## Error Handling
@@ -177,7 +197,8 @@ Parser is fault-tolerant:
 - Malformed input doesn't throw exceptions
 - Partially parsed content preserved in `parsed`
 - Unparsable remainder preserved in `unparsed`
-- Error positions tracked internally for debugging
+- Diagnostic records available in `errors: ParseError[]`
+- For **strict validation** check `errors.length === 0 && !unparsed.trim()`
 
 ## Common Tasks
 
@@ -193,9 +214,25 @@ ConditionParser.parse(input, {
 ```
 
 ### Routing expressions
-Use `preAddHook` to filter or route expressions:
+Use `preAddHook` to filter or route expressions. A falsy return **drops** the expression from `parsed` — its "join to next" operator is transferred to the predecessor and empty groups collapse.
 ```typescript
 ConditionParser.parse(input, {
   preAddHook: (ctx) => ctx.key === "special" ? null : ctx
 });
 ```
+
+## Breaking Changes (1.8.0)
+
+When working on consumers of this package, be aware:
+
+1. `preAddHook` falsy return now **drops** the expression (was: silently substituted `1=1` placeholder).
+2. `ConditionParserResult` has a new required field `errors: ParseError[]`.
+3. `Meta.values` typed `string[]` (was `any[]`); runtime unchanged.
+4. Balanced double-wrapped `((foo:bar))` no longer produces a phantom swallowed error.
+5. Stray `not` inside later terms no longer captures the cursor (preserves preceding expressions).
+6. Quoted and parenthesized values support `\\` (literal backslash) escape.
+7. Parenthesized values preserve balanced nested parens literally: `key:(a(b)c)` → `a(b)c`.
+8. Unquoted tokens accept more escape sequences (`\\`, `\:`, `\(`, `\)`, `\ `, `\⇥`).
+9. Empty `defaultOperator` falls back to `ConditionParser.DEFAULT_OPERATOR`.
+
+See [API.md#breaking-changes](./API.md#breaking-changes) for migration notes.

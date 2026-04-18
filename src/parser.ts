@@ -27,9 +27,25 @@ export interface Meta {
 	/** Array of unique operators found in the parsed expressions */
 	operators: string[];
 	/** Array of unique values found in the parsed expressions */
-	values: any[];
+	values: string[];
 	/** Array of unique expressions as {key, operator, value} objects */
 	expressions: ExpressionData[];
+}
+
+/**
+ * A diagnostic record produced when the parser cannot fully consume the input.
+ *
+ * The parser remains permissive (errors are not thrown to the caller) but they
+ * are surfaced here so consumers like validators can distinguish between
+ * "trailing free text" and "syntax error mid-expression".
+ */
+export interface ParseError {
+	/** Human-readable error message. */
+	message: string;
+	/** Zero-based character position in the original input where the error was detected. */
+	position: number;
+	/** A short slice of the input around `position` (with surrounding context). */
+	snippet: string;
 }
 
 /**
@@ -50,6 +66,14 @@ export interface ConditionParserResult {
 	 * Metadata about the parsed expressions (unique keys, operators, values).
 	 */
 	meta: Meta;
+	/**
+	 * Diagnostic errors collected while parsing. Empty when the input parsed cleanly.
+	 *
+	 * Note: a non-empty `errors` does not necessarily mean `parsed` is empty —
+	 * any successfully parsed prefix is preserved. Consumers wanting strict
+	 * validation should check both `errors.length === 0` and `unparsed === ""`.
+	 */
+	errors: ParseError[];
 }
 
 /**
@@ -87,10 +111,22 @@ export interface ConditionParserOptions {
 
 	/**
 	 * Hook function called before adding each expression to the output.
-	 * If it returns a falsy value, the expression will be skipped.
-	 * Useful for filtering or routing expressions to different destinations.
+	 *
+	 * Return the (possibly modified) `ExpressionContext` to keep the expression,
+	 * or return `null` / `undefined` to **drop** it from the output.
+	 *
+	 * When an expression is dropped:
+	 * - The expression is omitted from `parsed` and from `meta`.
+	 * - The "join to next sibling" operator that was attached to the dropped
+	 *   expression is transferred to its predecessor (if any), so the remaining
+	 *   chain reflects the user's original logical intent as closely as possible.
+	 * - If a parenthesized group ends up with no expressions, the group itself
+	 *   is removed from its parent.
+	 *
+	 * Useful for filtering or routing expressions to a different sink.
+	 *
 	 * @param context - The parsed expression context
-	 * @returns The expression context to add, or null/undefined to skip
+	 * @returns The expression context to add, or `null` / `undefined` to skip
 	 * @example
 	 * ```ts
 	 * preAddHook: (ctx) => {
@@ -103,6 +139,21 @@ export interface ConditionParserOptions {
 		context: ExpressionContext
 	) => null | undefined | ExpressionContext;
 }
+
+/**
+ * Sentinel pushed in place of an item that was skipped by `preAddHook`.
+ * It is removed from `out` after `parseTerm` returns; consumers never see it.
+ */
+const SKIP_MARKER = Symbol("ConditionParser.skip");
+
+/**
+ * Internal shape used for "in-flight" condition arrays. Holds the same items as
+ * `ConditionDump` plus an occasional `SKIP_MARKER` placeholder during parsing.
+ */
+type InternalDump = (
+	| ConditionDump[number]
+	| { __skip: typeof SKIP_MARKER; operator: ConditionJoinOperator }
+)[];
 
 /**
  * Human-friendly conditions notation parser for search expressions.
@@ -142,12 +193,22 @@ export interface ConditionParserOptions {
 export class ConditionParser {
 	/**
 	 * Default operator used when none is specified in the expression.
+	 *
+	 * Note: this is a writable static for convenience, but mutating it affects
+	 * every subsequent `ConditionParser.parse` call in the process. Prefer the
+	 * per-call `defaultOperator` option in long-lived processes.
+	 *
 	 * @default "eq"
 	 */
 	static DEFAULT_OPERATOR: string = "eq";
 
 	/**
 	 * Global debug flag. When true, all parser instances will log debug information.
+	 *
+	 * Note: this is a writable static for convenience, but mutating it affects
+	 * every subsequent `ConditionParser.parse` call in the process. Prefer the
+	 * per-call `debug` option in long-lived processes.
+	 *
 	 * @default false
 	 */
 	static DEBUG: boolean = false;
@@ -160,10 +221,10 @@ export class ConditionParser {
 	#depth: number = -1;
 
 	#meta = {
-		keys: new Set<string>([]),
-		operators: new Set<string>([]),
-		values: new Set<any>([]),
-		expressions: new Set<string>([]),
+		keys: new Set<string>(),
+		operators: new Set<string>(),
+		values: new Set<string>(),
+		expressions: new Set<string>(),
 	};
 
 	#transform: ConditionParserOptions["transform"];
@@ -176,9 +237,6 @@ export class ConditionParser {
 	) {
 		input = `${input}`.trim();
 
-		// removing this... makes no sense
-		// if (!input) throw new TypeError(`Expecting non empty input`);
-
 		const {
 			defaultOperator = ConditionParser.DEFAULT_OPERATOR,
 			debug = false,
@@ -188,7 +246,10 @@ export class ConditionParser {
 
 		this.#input = input;
 		this.#length = input.length;
-		this.#defaultOperator = defaultOperator;
+		this.#defaultOperator =
+			typeof defaultOperator === "string" && defaultOperator
+				? defaultOperator
+				: ConditionParser.DEFAULT_OPERATOR;
 		this.#debugEnabled = !!debug;
 
 		this.#debug(`[ ${this.#input} ]`, this.#defaultOperator);
@@ -259,17 +320,13 @@ export class ConditionParser {
 	 * Uses the public static helper internally.
 	 */
 	#createError(message: string): Error {
-		return ConditionParser.__createError(
-			this.#input,
-			this.#pos,
-			message
-		);
+		return ConditionParser.__createError(this.#input, this.#pos, message);
 	}
 
 	/** Will look ahead (if positive) or behind (if negative) based on `offset` */
 	#peek(offset: number = 0): string {
 		const at = this.#pos + offset;
-		return at < this.#length ? this.#input[at] : "";
+		return at >= 0 && at < this.#length ? this.#input[at] : "";
 	}
 
 	/** Will move the internal cursor one character ahead */
@@ -280,7 +337,7 @@ export class ConditionParser {
 	/** Will move the internal cursor at the end of the currently ahead whitespace block. */
 	#consumeWhitespace(): void {
 		while (this.#pos < this.#length && /\s/.test(this.#peek())) {
-			this.#consume();
+			this.#pos++;
 		}
 	}
 
@@ -298,6 +355,13 @@ export class ConditionParser {
 		return this.#pos >= this.#length;
 	}
 
+	/**
+	 * Reads a parenthesized value: `(...)`. Supports balanced nested parens
+	 * and backslash escapes for `\(`, `\)`, and `\\`.
+	 *
+	 * The opening `(` is consumed; the matching closing `)` is consumed too.
+	 * The returned string contains everything in between (with escapes resolved).
+	 */
 	#parseParenthesizedValue(): string {
 		this.#debug("parseParenthesizedValue:start");
 		// sanity
@@ -309,28 +373,54 @@ export class ConditionParser {
 		this.#consume();
 
 		let result = "";
-		const closing = ")";
+		let depth = 1;
 
 		while (this.#pos < this.#length) {
-			const char = this.#consume();
-			if (char === closing && this.#peek(-2) !== "\\") {
-				this.#debug("parseParenthesizedValue:result", result, this.#peek());
+			const char = this.#consume()!;
 
-				return result;
-			}
-			if (char === "\\" && this.#peek() === closing) {
-				result += closing;
-				this.#consume(); // Skip the escaped char
-			} else {
+			if (char === "\\") {
+				const next = this.#peek();
+				if (next === "(" || next === ")" || next === "\\") {
+					result += next;
+					this.#consume();
+					continue;
+				}
+				// Stray backslash — keep literal.
 				result += char;
+				continue;
 			}
+
+			if (char === "(") {
+				depth++;
+				result += char;
+				continue;
+			}
+
+			if (char === ")") {
+				depth--;
+				if (depth === 0) {
+					this.#debug(
+						"parseParenthesizedValue:result",
+						result,
+						this.#peek()
+					);
+					return result;
+				}
+				result += char;
+				continue;
+			}
+
+			result += char;
 		}
 
 		throw this.#createError("Unterminated parenthesized string");
 	}
 
-	/** Will parse the currently ahead quoted block with escape support.
-	 * Supports both single ' and double " quotes. */
+	/**
+	 * Reads a single- or double-quoted string with backslash escapes.
+	 * Supports `\\` (literal backslash), `\<quote>` (literal quote of the
+	 * matching kind), plus stray backslashes are kept literal.
+	 */
 	#parseQuotedString(): string {
 		this.#debug("parseQuotedString:start");
 		// sanity
@@ -338,94 +428,133 @@ export class ConditionParser {
 			throw this.#createError("Not quoted string");
 		}
 
-		let result = "";
 		// Consume opening quote
-		const quote = this.#consume();
+		const quote = this.#consume()!;
+		let result = "";
 
 		while (this.#pos < this.#length) {
-			const char = this.#consume();
-			if (char === quote && this.#peek(-2) !== "\\") {
+			const char = this.#consume()!;
+
+			if (char === "\\") {
+				const next = this.#peek();
+				if (next === quote || next === "\\") {
+					result += next;
+					this.#consume();
+					continue;
+				}
+				// Stray backslash — keep literal.
+				result += char;
+				continue;
+			}
+
+			if (char === quote) {
 				this.#debug("parseQuotedString:result", result);
 				return result;
 			}
-			if (char === "\\" && this.#peek() === quote) {
-				result += quote;
-				this.#consume(); // Skip the escaped quote
-			} else {
-				result += char;
-			}
+
+			result += char;
 		}
 
 		throw this.#createError("Unterminated quoted string");
 	}
 
-	/** Will parse the currently ahead unquoted block until delimiter ":", "(", ")", or \s) */
+	/**
+	 * Reads an unquoted token, terminated by `:`, `(`, `)`, or whitespace.
+	 * Backslash escapes for `\:`, `\\`, `\ ` (space), `\(`, `\)` are supported;
+	 * stray backslashes are kept literal.
+	 */
 	#parseUnquotedString(): string {
 		this.#debug("parseUnquotedString:start");
 		let result = "";
+
 		while (this.#pos < this.#length) {
 			const char = this.#peek();
+
+			if (char === "\\") {
+				const next = this.#peek(1);
+				if (
+					next === ":" ||
+					next === "\\" ||
+					next === "(" ||
+					next === ")" ||
+					next === " " ||
+					next === "\t"
+				) {
+					result += next;
+					this.#consume(); // backslash
+					this.#consume(); // escaped char
+					continue;
+				}
+				// Stray backslash — keep literal and continue.
+				result += this.#consume();
+				continue;
+			}
+
 			if (
-				(char === ":" && this.#peek(-1) !== "\\") ||
+				char === ":" ||
 				char === "(" ||
 				char === ")" ||
 				/\s/.test(char)
 			) {
 				break;
 			}
-			if (char === "\\" && this.#peek(1) === ":") {
-				result += ":";
-				this.#consume(); // Skip the backslash
-				this.#consume(); // Skip the escaped colon
-			} else {
-				result += this.#consume();
-			}
+
+			result += this.#consume();
 		}
+
 		result = result.trim();
 		this.#debug("parseUnquotedString:result", result);
 		return result;
 	}
 
-	/** Will parse the "and" or "or" logical operator */
-	#parseConditionOperator(
-		openingParenthesesLevel?: number
-	): ConditionJoinOperator | null {
+	/**
+	 * Tries to parse an `and` / `or` / `and not` / `or not` join operator at
+	 * the current position. Returns the matched operator or `null` if none.
+	 *
+	 * The "not" suffix is only matched when it appears **immediately** after
+	 * the join keyword (separated by whitespace), preventing earlier bugs
+	 * where `not` anywhere later in the input could capture the cursor.
+	 */
+	#parseConditionOperator(): ConditionJoinOperator | null {
 		this.#debug("parseConditionOperator:start", this.#peek());
 		this.#consumeWhitespace();
 		const remaining = this.#input.slice(this.#pos);
 		let result: ConditionJoinOperator | null = null;
 
-		const _isNotAhead = (s: string) => /\s*not\s+/i.exec(s);
+		// Match a "not " (or "not" at EOF would be bogus — require trailing ws).
+		const notAfter = (afterIndex: number): number => {
+			const slice = remaining.slice(afterIndex);
+			const m = /^\s*not(\s+|$)/i.exec(slice);
+			return m ? m[0].length : 0;
+		};
 
-		if (/^and /i.test(remaining)) {
-			this.#pos += 4;
-			result = "and";
-
-			// maybe followed by "not"?
-			const notIsAheadMatch = _isNotAhead(remaining);
-			if (notIsAheadMatch) {
-				// minus 1, because the initial test includes single trailing whitespace
-				this.#pos += notIsAheadMatch[0].length - 1;
-				result = "andNot";
-			}
-		} else if (/^or /i.test(remaining)) {
+		if (/^and(\s|$)/i.test(remaining)) {
 			this.#pos += 3;
-			result = "or";
-
-			// maybe followed by "not"?
-			const notIsAheadMatch = _isNotAhead(remaining);
-			if (notIsAheadMatch) {
-				// minus 1, because the initial test includes single trailing whitespace
-				this.#pos += notIsAheadMatch[0].length - 1;
-				result = "orNot";
+			result = "and";
+			const skip = notAfter(3);
+			// only treat as "and not" if there is something AFTER the "not " too
+			if (skip && remaining.length > 3 + skip) {
+				this.#pos += skip;
+				result = "andNot";
+			} else if (!skip) {
+				// require at least one whitespace after "and"
+				if (!/^and\s/i.test(remaining)) {
+					this.#pos -= 3;
+					result = null;
+				}
 			}
-		} else if (openingParenthesesLevel !== undefined) {
-			const preLevel = openingParenthesesLevel;
-			const postLevel = this.#countSameCharsAhead(")");
-			if (preLevel !== postLevel) {
-				throw this.#createError(
-					`Parentheses level mismatch (opening: ${preLevel}, closing: ${postLevel})`
-				);
+		} else if (/^or(\s|$)/i.test(remaining)) {
+			this.#pos += 2;
+			result = "or";
+			const skip = notAfter(2);
+			if (skip && remaining.length > 2 + skip) {
+				this.#pos += skip;
+				result = "orNot";
+			} else if (!skip) {
+				if (!/^or\s/i.test(remaining)) {
+					this.#pos -= 2;
+					result = null;
+				}
 			}
 		}
 
@@ -435,85 +564,99 @@ export class ConditionParser {
 
 	/** Will parse the key:operator:value segment */
 	#parseBasicExpression(
-		out: ConditionDump,
+		out: InternalDump,
 		currentOperator: ConditionJoinOperator
 	) {
 		this.#debug("parseBasicExpression:start", currentOperator);
 
-		// so we can restore "unparsed"
+		// so we can restore "unparsed" — any error that escapes this method
+		// rewinds the cursor to the start of the token, so the caller surfaces
+		// the whole bad expression as `unparsed` (rather than a silently-eaten
+		// slice of it).
 		const _startPos = this.#pos;
 
-		let key;
-		if (this.#isQuoteAhead()) {
-			key = this.#parseQuotedString();
-		} else {
-			key = this.#parseUnquotedString();
-		}
-
-		// Consume the first colon
-		this.#consumeWhitespace();
-		if (this.#consume() !== ":") {
-			this.#pos = _startPos;
-			throw this.#createError("Expected colon after key");
-		}
-		this.#consumeWhitespace();
-
-		// Check if we have an operator
-		let operator = this.#defaultOperator;
-		let value;
+		let key: string;
+		let operator: string;
+		let value: string;
 		let wasParenthesized = false;
 
-		// Try to parse as if we have an operator
-		if (this.#isOpeningParenthesisAhead()) {
-			wasParenthesized = true;
-			value = this.#parseParenthesizedValue();
-		} else if (this.#isQuoteAhead()) {
-			value = this.#parseQuotedString();
-		} else {
-			value = this.#parseUnquotedString();
-		}
-
-		this.#consumeWhitespace();
-
-		// If we find a colon, what we parsed was actually an operator
-		if (this.#peek() === ":") {
-			if (wasParenthesized) {
-				this.#pos = _startPos;
-				throw this.#createError("Operator cannot be a parenthesized expression");
+		try {
+			if (this.#isQuoteAhead()) {
+				key = this.#parseQuotedString();
+			} else {
+				key = this.#parseUnquotedString();
 			}
-			operator = value;
-			this.#consume(); // consume the second colon
+
+			// Consume the first colon
+			this.#consumeWhitespace();
+			if (this.#consume() !== ":") {
+				throw this.#createError("Expected colon after key");
+			}
 			this.#consumeWhitespace();
 
-			// Parse the actual value
+			// Check if we have an operator
+			operator = this.#defaultOperator;
+
+			// Try to parse as if we have an operator
 			if (this.#isOpeningParenthesisAhead()) {
-				// this.#pos = _startPos;
-				// throw new Error("Value cannot be a parenthesized expression");
+				wasParenthesized = true;
 				value = this.#parseParenthesizedValue();
 			} else if (this.#isQuoteAhead()) {
 				value = this.#parseQuotedString();
 			} else {
 				value = this.#parseUnquotedString();
 			}
+
+			this.#consumeWhitespace();
+
+			// If we find a colon, what we parsed was actually an operator
+			if (this.#peek() === ":") {
+				if (wasParenthesized) {
+					throw this.#createError(
+						"Operator cannot be a parenthesized expression"
+					);
+				}
+				operator = value;
+				this.#consume(); // consume the second colon
+				this.#consumeWhitespace();
+
+				// Parse the actual value
+				if (this.#isOpeningParenthesisAhead()) {
+					value = this.#parseParenthesizedValue();
+				} else if (this.#isQuoteAhead()) {
+					value = this.#parseQuotedString();
+				} else {
+					value = this.#parseUnquotedString();
+				}
+			}
+		} catch (e) {
+			this.#pos = _startPos;
+			throw e;
 		}
 
-		let expression: undefined | null | ExpressionContext = this.#transform?.({
-			key,
-			operator,
-			value,
-		}) ?? {
-			key,
-			operator,
-			value,
-		};
+		// Apply transform; we trust the user's transform to return a context.
+		const transformed = this.#transform({ key, operator, value });
+		const expression: ExpressionContext = transformed ?? { key, operator, value };
 
-		if (typeof this.#preAddHook === "function") {
-			expression = this.#preAddHook(expression);
-			// return early if hook returned falsey
-			if (!expression) {
-				this.#debug("parseBasicExpression:preAddHook truthy skip...");
-				expression = { key: "1", operator: this.#defaultOperator, value: "1" };
+		// preAddHook may drop the expression entirely.
+		if (this.#preAddHook) {
+			const kept = this.#preAddHook(expression);
+			if (!kept) {
+				this.#debug("parseBasicExpression:preAddHook drop");
+				// Push a skip marker; #parseCondition will remove it AFTER it has
+				// had a chance to set its operator from the next iteration's
+				// conditionOperator. This is essential to correctly transfer the
+				// "join to next" operator from the dropped item to its predecessor.
+				out.push({
+					__skip: SKIP_MARKER,
+					operator: currentOperator,
+				});
+				return;
 			}
+			// preAddHook may have returned a modified context.
+			(expression as any).key = kept.key;
+			(expression as any).operator = kept.operator;
+			(expression as any).value = kept.value;
 		}
 
 		const result = {
@@ -523,9 +666,13 @@ export class ConditionParser {
 		};
 		this.#debug("parseBasicExpression:result", result);
 
-		this.#meta.keys.add(expression.key);
-		this.#meta.operators.add(expression.operator);
-		this.#meta.values.add(expression.value);
+		this.#meta.keys.add(String(expression.key));
+		this.#meta.operators.add(String(expression.operator));
+		this.#meta.values.add(
+			typeof expression.value === "string"
+				? expression.value
+				: String(expression.value)
+		);
 
 		// need to make it unique... so just quick-n-dirty
 		this.#meta.expressions.add(
@@ -537,7 +684,7 @@ export class ConditionParser {
 
 	/** Will recursively parse (...) */
 	#parseParenthesizedExpression(
-		out: ConditionDump,
+		out: InternalDump,
 		currentOperator: ConditionJoinOperator
 	) {
 		this.#debug("parseParenthesizedExpression:start", currentOperator);
@@ -550,12 +697,13 @@ export class ConditionParser {
 		this.#consumeWhitespace();
 
 		// IMPORTANT: we're going deeper, so need to create the nested level
+		const nested: InternalDump = [];
 		out.push({
-			condition: [],
+			condition: nested as ConditionDump,
 			operator: currentOperator,
 			expression: undefined,
 		});
-		this.#parseCondition(out.at(-1)!.condition!, currentOperator);
+		this.#parseCondition(nested, currentOperator);
 
 		this.#consumeWhitespace();
 
@@ -567,11 +715,17 @@ export class ConditionParser {
 		// consume closing parenthesis
 		this.#consume();
 
+		// If the inner condition ended up empty (e.g. all members were dropped
+		// by preAddHook), drop the wrapper too.
+		if (nested.length === 0) {
+			out.pop();
+		}
+
 		this.#debug("parseParenthesizedExpression:result");
 	}
 
 	/** Will parse either basic or parenthesized term based on look ahead */
-	#parseTerm(out: ConditionDump, currentOperator: ConditionJoinOperator) {
+	#parseTerm(out: InternalDump, currentOperator: ConditionJoinOperator) {
 		this.#debug("parseTerm:start", currentOperator, this.#peek());
 		this.#consumeWhitespace();
 
@@ -585,39 +739,20 @@ export class ConditionParser {
 		this.#debug("parseTerm:end", this.#peek());
 	}
 
-	/** will count how many same exact consequent `char`s are ahead (excluding whitespace) */
-	#countSameCharsAhead(char: string) {
-		const posBkp = this.#pos;
-		let count = 0;
-		let next = this.#consume();
-		while (next === char) {
-			count++;
-			this.#consumeWhitespace();
-			next = this.#consume();
-		}
-		this.#pos = posBkp;
-		return count;
-	}
-
-	#moveToFirstMatch(regex: RegExp) {
-		let bkp = this.#pos;
-		let next = this.#consume();
-		let match = next && regex.test(next);
-		while (match) {
-			this.#consumeWhitespace();
-			bkp = this.#pos;
-			next = this.#consume();
-			match = next && regex.test(next);
-		}
-		this.#pos = bkp;
+	/**
+	 * Test whether the last entry in `out` is a skip marker (placeholder that
+	 * will not survive into the public output).
+	 */
+	#lastIsSkip(out: InternalDump): boolean {
+		const last = out.at(-1) as any;
+		return !!last && last.__skip === SKIP_MARKER;
 	}
 
 	/** Parses sequences of terms connected by logical operators (and/or) */
 	#parseCondition(
-		out: ConditionDump,
-		conditionOperator: ConditionJoinOperator,
-		openingParenthesesLevel?: number
-	): ConditionDump {
+		out: InternalDump,
+		conditionOperator: ConditionJoinOperator
+	): InternalDump {
 		this.#depth++;
 		this.#consumeWhitespace();
 
@@ -626,13 +761,15 @@ export class ConditionParser {
 		// Parse first term
 		this.#parseTerm(out, conditionOperator);
 
+		// If the very first term was a skip placeholder, remove it before the
+		// loop runs — it has no predecessor to inherit its operator.
+		if (this.#lastIsSkip(out)) out.pop();
+
 		// Parse subsequent terms
 		while (true) {
 			this.#consumeWhitespace();
 
-			conditionOperator = this.#parseConditionOperator(
-				openingParenthesesLevel
-			)!;
+			conditionOperator = this.#parseConditionOperator()!;
 
 			// no recognized condition
 			if (!conditionOperator) {
@@ -645,23 +782,27 @@ export class ConditionParser {
 				}
 			}
 
-			// point here is that we must expect #parseTerm below to fail (trailing
-			// unparsable content is legit), so we need to save current operator to
-			// be able to restore it
-			const _previousBkp = out.at(-1)!.operator;
-
-			// "previous" operator edit to match condition-builder convention
-			out.at(-1)!.operator = conditionOperator;
+			// "previous" operator edit to match condition-builder convention.
+			// If the previous slot is empty (very first term was skipped) skip
+			// the assignment — otherwise we set/transfer the operator.
+			const prev = out.at(-1);
+			const _previousBkp = prev?.operator;
+			if (prev) prev.operator = conditionOperator;
 
 			try {
 				this.#parseTerm(out, conditionOperator);
 			} catch (e) {
 				this.#debug(`${e}`);
-				// restore
-				out.at(-1)!.operator = _previousBkp;
-				// and catch unparsed below
+				// restore on error so the previous chain isn't corrupted
+				if (prev) prev.operator = _previousBkp!;
 				throw e;
 			}
+
+			// If parseTerm pushed a skip marker, the "join to next" operator
+			// it would have carried is preserved on the predecessor (whose
+			// .operator we just set above). Remove the marker now so the chain
+			// stays clean for the next iteration.
+			if (this.#lastIsSkip(out)) out.pop();
 		}
 
 		this.#depth--;
@@ -677,6 +818,7 @@ export class ConditionParser {
 	 *   - `parsed`: Array of parsed condition expressions in ConditionDump format
 	 *   - `unparsed`: Any trailing text that couldn't be parsed (useful for free-text search)
 	 *   - `meta`: Metadata about the parsed expressions (unique keys, operators, values)
+	 *   - `errors`: Diagnostic records collected during parsing (empty when successful)
 	 *
 	 * @example
 	 * Basic parsing:
@@ -709,19 +851,43 @@ export class ConditionParser {
 	): ConditionParserResult {
 		const parser = new ConditionParser(input, options);
 
-		let parsed: ConditionDump = [];
+		const internal: InternalDump = [];
 		let unparsed = "";
+		const errors: ParseError[] = [];
 
-		const openingLevel = parser.#countSameCharsAhead("(");
+		// Empty input is a no-op (avoid throwing "Expected colon after key" at pos 0).
+		if (parser.#length > 0) {
+			try {
+				parser.#parseCondition(internal, "and");
+			} catch (e) {
+				parser.#debug(`${e}`);
+				// collect trailing unparsed input
+				unparsed = parser.#input.slice(parser.#pos);
+				const message = e instanceof Error ? e.message : String(e);
+				// First line of `__createError`-formatted messages is the bare cause.
+				const firstLine = message.split("\n", 1)[0];
+				const start = Math.max(0, parser.#pos - 20);
+				const end = Math.min(parser.#input.length, parser.#pos + 20);
+				errors.push({
+					message: firstLine,
+					position: parser.#pos,
+					snippet: parser.#input.slice(start, end),
+				});
+			}
 
-		try {
-			// Start with the highest-level logical expression
-			parsed = parser.#parseCondition(parsed, "and", openingLevel);
-		} catch (_e) {
-			if (options.debug) parser.#debug(`${_e}`);
-			// collect trailing unparsed input
-			unparsed = parser.#input.slice(parser.#pos);
+			// Trailing content that wasn't grabbed by the throw path (e.g. an
+			// unmatched closing parenthesis at the top level breaks the parse
+			// loop without throwing). Surface it as `unparsed` to match the
+			// long-standing convention.
+			if (!unparsed && parser.#pos < parser.#length) {
+				unparsed = parser.#input.slice(parser.#pos);
+			}
 		}
+
+		// Strip any lingering skip markers (defensive — should never happen).
+		const parsed = internal.filter(
+			(item: any) => !item || item.__skip !== SKIP_MARKER
+		) as ConditionDump;
 
 		return {
 			parsed,
@@ -735,6 +901,7 @@ export class ConditionParser {
 					return { key, operator, value };
 				}),
 			},
+			errors,
 		};
 	}
 }
