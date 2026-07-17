@@ -3,7 +3,7 @@
 ## Package Overview
 
 - **Name**: `@marianmeres/condition-parser`
-- **Version**: 1.8.0 (pending release; see deno.json for current)
+- **Version**: 1.8.2 (source of truth: `deno.json`)
 - **Purpose**: Human-friendly search conditions notation parser (Gmail-style search syntax)
 - **License**: MIT
 - **Runtime**: Deno (primary), Node.js (via NPM distribution)
@@ -126,7 +126,7 @@ conditionOp    := "and" | "or" | "and not" | "or not" | <implicit and>
 
 ### Runtime
 
-- `@marianmeres/condition-builder` - Type definitions and integration target
+- `@marianmeres/condition-builder` (`^1.11.0`) - Type definitions (`ConditionDump`, `ConditionJoinOperator`, `ExpressionContext`) and integration target
 
 ### Development
 

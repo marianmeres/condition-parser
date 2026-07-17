@@ -142,3 +142,7 @@ assertEquals(
 ## Related
 
 [@marianmeres/condition-builder](https://github.com/marianmeres/condition-builder)
+
+## License
+
+[MIT](LICENSE)
