@@ -1,7 +1,7 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@marianmeres/condition-builder@^1.10.0": "1.10.0",
+    "jsr:@marianmeres/condition-builder@^1.11.0": "1.11.0",
     "jsr:@marianmeres/mcp-server@*": "1.1.2",
     "jsr:@marianmeres/npmbuild@^1.16.0": "1.16.0",
     "jsr:@std/assert@^1.0.19": "1.0.19",
@@ -17,8 +17,8 @@
     "npm:zod@^3.24.0": "3.25.76"
   },
   "jsr": {
-    "@marianmeres/condition-builder@1.10.0": {
-      "integrity": "934b3004aba4ad5d0f1ac417921f875486681f3fc9a4247586968c792377b1ba"
+    "@marianmeres/condition-builder@1.11.0": {
+      "integrity": "7d351c5fa01820a00c0a4202ed641207b88e4f5bb696a66edb828ed039064f30"
     },
     "@marianmeres/mcp-server@1.1.2": {
       "integrity": "b475f653eb478f4cd026fe82771f529454bf8813b5280f0f1fb018974472b0e2",
@@ -67,7 +67,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@marianmeres/condition-builder@^1.10.0",
+      "jsr:@marianmeres/condition-builder@^1.11.0",
       "jsr:@marianmeres/npmbuild@^1.16.0",
       "jsr:@std/assert@^1.0.19",
       "jsr:@std/fs@^1.0.24",
