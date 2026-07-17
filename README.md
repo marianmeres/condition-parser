@@ -84,8 +84,8 @@ const result = ConditionParser.parse(
         },
         {
             condition: [
-                { expression: [{ key: "c", operator: "eq", value: "d" }], operator: "or" },
-                { expression: [{ key: "e", operator: "eq", value: "f" }], operator: "or" }
+                { expression: { key: "c", operator: "eq", value: "d" }, operator: "or" },
+                { expression: { key: "e", operator: "eq", value: "f" }, operator: "or" }
             ],
             operator: "and"
         }
